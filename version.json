@@ -1,17 +1,17 @@
 {
-  "versionCode": 176,
-  "versionName": "0.1.175",
+  "versionCode": 179,
+  "versionName": "0.1.178",
   "url": "https://github.com/mailroni-cell/nova-access/raw/main/NOVA.apk",
   "urls": [
-    "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@8722456dd23f54300901c2a640eb561cc2b47bc2/NOVA.apk",
-    "https://raw.githubusercontent.com/mailroni-cell/nova-access/8722456dd23f54300901c2a640eb561cc2b47bc2/NOVA.apk"
+    "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@e302c7acd41332f6b6a37a383884ff289cc75762/NOVA.apk",
+    "https://raw.githubusercontent.com/mailroni-cell/nova-access/e302c7acd41332f6b6a37a383884ff289cc75762/NOVA.apk"
   ],
   "admin": {
-    "versionCode": 176,
-    "versionName": "1.0.175",
+    "versionCode": 179,
+    "versionName": "1.0.178",
     "urls": [
-      "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@8722456dd23f54300901c2a640eb561cc2b47bc2/NOVA-Admin.apk",
-      "https://raw.githubusercontent.com/mailroni-cell/nova-access/8722456dd23f54300901c2a640eb561cc2b47bc2/NOVA-Admin.apk"
+      "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@e302c7acd41332f6b6a37a383884ff289cc75762/NOVA-Admin.apk",
+      "https://raw.githubusercontent.com/mailroni-cell/nova-access/e302c7acd41332f6b6a37a383884ff289cc75762/NOVA-Admin.apk"
     ]
   }
 }
