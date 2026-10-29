@@ -15,6 +15,7 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-164 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 170"): checks for a new version every 10 minutes while open (not only at start), restarts only when idle and no dialog is open; version shown in the title.
 # Updated S-162 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 168"): invite + reminder explain the install pop-ups (install anyway), like Admin on the phone.
 # Updated S-160 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): reads / writes Roni's Cloudflare relay AND ntfy.sh (old NOVA versions), like Admin 240.
 # Updated S-159 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): presence window 25 minutes, "x" = NOVA closed (ntfy.sh 250 messages a day per home).
@@ -23,7 +24,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 7
+$PcVersion = 8
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -420,7 +421,7 @@ function Check-Crashes {
         $script:crash.logs = @(($new + $old) | Sort-Object -Property t -Descending | Select-Object -First 30)
         $script:crash.since = ($new | Measure-Object -Property t -Maximum).Maximum
         Save-Crash
-        try { $win.Title = 'SUPER NOVA · ניהול · ⚠ קריסה חדשה' } catch { }
+        try { $win.Title = "SUPER NOVA · ניהול · גרסה $PcVersion · ⚠ קריסה חדשה" } catch { }
     } $null
 }
 
@@ -664,6 +665,9 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
 </Window>
 '@
 $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
+$win.Title = "SUPER NOVA · ניהול · גרסה $PcVersion"   # S-164
+$script:lastInput = Get-Date   # S-164: self-update restarts only after a minute without typing / clicking
+$win.Add_PreviewKeyDown({ $script:lastInput = Get-Date }); $win.Add_PreviewMouseDown({ $script:lastInput = Get-Date })
 $ui = @{}
 $xaml.SelectNodes('//*[@*[local-name()="Name"]]') | ForEach-Object { $n = $_.Attributes | Where-Object { $_.LocalName -eq 'Name' } | Select-Object -First 1; $ui[$n.Value] = $win.FindName($n.Value) }
 $bc = New-Object Windows.Media.BrushConverter
@@ -982,7 +986,7 @@ function Show-Crashes {
     }
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
     $script:crash.read = [int64](@($script:crash.logs | ForEach-Object { [int64]$_.t }) + @(0) | Measure-Object -Maximum).Maximum; Save-Crash
-    $win.Title = 'SUPER NOVA · ניהול'
+    $win.Title = "SUPER NOVA · ניהול · גרסה $PcVersion"
     [void]$d.win.ShowDialog(); Refresh-UI
 }
 function Show-Settings {
@@ -1131,16 +1135,19 @@ $minute.Add_Tick({
     $script:minutes++
     Check-Presence; Check-Crashes; Check-Receipts   # S-158
     if ($script:minutes % 5 -eq 0) { Check-Live }
+    if ($script:minutes % 10 -eq 0) { Check-SelfUpdate $true }   # S-164: also while the window stays open
 })
 $minute.Start()
 
 # ── updates itself from nova-access (version.json "adminPc") ─────────────────
-function Check-SelfUpdate {
+function Check-SelfUpdate([bool]$quiet = $false) {
     Fetch ("https://raw.githubusercontent.com/$Repo/main/version.json?t=" + (Now-S)) {
         param($text)
         if (-not $text) { return }
         try { $a = ($text | ConvertFrom-Json).adminPc } catch { return }
         if (-not $a -or [int]$a.version -le $PcVersion -or -not $a.url) { return }
+        # S-164: from the timer, never in the middle of work: no open dialog, no sync, a minute without typing / clicking
+        if ($quiet -and ($script:busy -or $win.OwnedWindows.Count -gt 0 -or ((Get-Date) - $script:lastInput).TotalSeconds -lt 60)) { return }
         try {
             $bytes = $script:http.GetByteArrayAsync([string]$a.url).GetAwaiter().GetResult()
             $body = $utf8.GetString($bytes)
