@@ -15,13 +15,14 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-160 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): reads / writes Roni's Cloudflare relay AND ntfy.sh (old NOVA versions), like Admin 240.
 # Updated S-159 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): presence window 25 minutes, "x" = NOVA closed (ntfy.sh 250 messages a day per home).
 # Updated S-158 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): message log + receipts (shown / closed), like Admin 236 on the phone.
 # Updated S-155 2026-10-29 (Claude Opus 5.5, thread "קרא MD והמשך"): install journey shared with the phone (admin.enc inv / invVia / inst).
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 5
+$PcVersion = 6
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -131,8 +132,16 @@ $PresenceTopic = 'nova-p' + (H24 "presence|$Salt")
 $PresenceWindow = 1500   # S-159: NOVA reports on a change + every 20 minutes (ntfy.sh 250 messages a day per home); "x" = closed
 $CrashTopic    = 'nova-x' + (H24 "crash|$Salt")
 $ReceiptTopic  = 'nova-r' + (H24 "receipt|$Salt")   # S-158: r1|<code tag>|<message id>|<s / c>|<device>|<model>
+# S-160 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): Roni's own relay on Cloudflare (tools/nova-relay/worker.js), same API as ntfy.sh.
+$RelayHost = 'https://nova-relay.mail-roni.workers.dev/'
+function Post-One($url, $body) {
+    try { Invoke-WebRequest -UseBasicParsing -Method Post -Uri $url -Body $utf8.GetBytes($body) -TimeoutSec 15 | Out-Null; return $true } catch { return $false }
+}
+# S-160: to the relay AND ntfy.sh, so NOVA versions from before 240 (they read ntfy.sh only) still get a restart
 function Ntfy-Post($topic, $body) {
-    try { Invoke-WebRequest -UseBasicParsing -Method Post -Uri ('https://ntfy.sh/' + $topic) -Body $utf8.GetBytes($body) -TimeoutSec 15 | Out-Null; return $true } catch { return $false }
+    $a = Post-One ($RelayHost + $topic) $body
+    $b = Post-One ('https://ntfy.sh/' + $topic) $body
+    return ($a -or $b)
 }
 function Ntfy-Parse($text) {
     $out = @()
@@ -335,6 +344,13 @@ $script:jobs = New-Object System.Collections.ArrayList
 function Fetch($url, [scriptblock]$done, $state) {
     try { [void]$script:jobs.Add(@{ t = $script:http.GetStringAsync($url); done = $done; state = $state }) } catch { }
 }
+# S-160: one topic from the relay and from ntfy.sh (old NOVA versions write there); $done gets both texts together, or $null if both failed
+function Fetch-Topic($path, [scriptblock]$done) {
+    $st = @{ n = 0; parts = (New-Object System.Collections.ArrayList); done = $done; ok = $false }
+    foreach ($h in @($RelayHost, 'https://ntfy.sh/')) {
+        Fetch ($h + $path) { param($text, $s) $s.n++; if ($null -ne $text) { [void]$s.parts.Add($text); $s.ok = $true }; if ($s.n -eq 2) { & $s.done $(if ($s.ok) { $s.parts -join "`n" } else { $null }) } } $st
+    }
+}
 function Check-Live {
     foreach ($u in @($script:users | Where-Object { $_.active -and -not $_.del })) {
         $g = $script:grants[$u.id + $u.d]
@@ -364,7 +380,7 @@ function Check-Presence {
     if (-not $script:historyRead) {
         Fetch ("https://raw.githubusercontent.com/$Repo/main/version.json?t=$now") { param($text) if ($text) { try { $script:novaLatest = [int](($text | ConvertFrom-Json).versionCode) } catch { } } } $null
     }
-    Fetch ("https://ntfy.sh/$PresenceTopic/json?poll=1&since=$since") {
+    Fetch-Topic ("$PresenceTopic/json?poll=1&since=$since") {
         param($text)
         if ($null -eq $text) { return }
         $now = Now-S; $all = @{}; $fresh = @{}
@@ -391,7 +407,7 @@ function Check-Presence {
     } $null
 }
 function Check-Crashes {
-    Fetch ("https://ntfy.sh/$CrashTopic/json?poll=1&since=" + [int64]$script:crash.since) {
+    Fetch-Topic ("$CrashTopic/json?poll=1&since=" + [int64]$script:crash.since) {
         param($text)
         if ($null -eq $text) { return }
         $old = @($script:crash.logs)
@@ -422,7 +438,7 @@ function Apply-Receipts($msgs, $got) {
 }
 function Check-Receipts {
     if (-not @($script:msgs).Count) { return }
-    Fetch ("https://ntfy.sh/$ReceiptTopic/json?poll=1&since=" + ((Now-S) - 12 * 3600)) {
+    Fetch-Topic ("$ReceiptTopic/json?poll=1&since=" + ((Now-S) - 12 * 3600)) {
         param($text)
         if (-not $text -or $script:busy) { return }
         $byTag = @{}; foreach ($u in $script:users) { $byTag[(Code-Tag (Normalize $u.pretty))] = $u.id }
