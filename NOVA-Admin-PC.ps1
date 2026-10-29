@@ -16,9 +16,10 @@
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
 # Updated S-155 2026-10-29 (Claude Opus 5.5, thread "קרא MD והמשך"): install journey shared with the phone (admin.enc inv / invVia / inst).
+# Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 2
+$PcVersion = 3
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -308,6 +309,8 @@ $script:novaLatest = 0; $script:historyRead = $false
 $script:crash = [pscustomobject]@{ since = ((Now-S) - 12 * 3600); read = 0; logs = @() }
 try { $c = (Read-Text $crashFile) | ConvertFrom-Json; if ($c) { $script:crash = $c; $script:crash.logs = @($c.logs | Where-Object { $_ }) } } catch { }
 function Save-Crash { try { Write-Text $crashFile (ConvertTo-Json -InputObject $script:crash -Depth 4 -Compress) } catch { } }
+if (-not ($script:crash.PSObject.Properties.Name -contains 'handled')) { $script:crash | Add-Member -NotePropertyName handled -NotePropertyValue @() -Force } # S-156
+$script:crash.handled = @($script:crash.handled | Where-Object { $_ })
 function Crash-Unread { return @($script:crash.logs | Where-Object { [int64]$_.t -gt [int64]$script:crash.read }).Count }
 function Is-Admin($u) { return ($u.adm -or $script:admins[$u.id] -eq $true) }
 function Shown-Users { return @(@($script:users | Where-Object { -not $_.del }) | Sort-Object -Property @{ Expression = { Is-Admin $_ }; Descending = $true }, @{ Expression = { $_.date }; Descending = $true }) }
@@ -382,7 +385,8 @@ function Check-Crashes {
         $old = @($script:crash.logs)
         $seen = @{}; foreach ($o in $old) { $seen[[string]$o.t + '|' + $o.x] = 1 }
         $new = @()
-        foreach ($m in (Ntfy-Parse $text)) { if (-not $seen.ContainsKey([string]$m.at + '|' + $m.body)) { $new += [pscustomobject]@{ t = $m.at; x = $m.body } } }
+        foreach ($h in @($script:crash.handled)) { $seen['h' + [string]$h] = 1 } # S-156
+        foreach ($m in (Ntfy-Parse $text)) { if (-not $seen.ContainsKey([string]$m.at + '|' + $m.body) -and -not $seen.ContainsKey('h' + [string]$m.at)) { $new += [pscustomobject]@{ t = $m.at; x = $m.body } } }
         if ($new.Count -eq 0) { return }
         $script:crash.logs = @(($new + $old) | Sort-Object -Property t -Descending | Select-Object -First 30)
         $script:crash.since = ($new | Measure-Object -Property t -Maximum).Maximum
@@ -826,6 +830,17 @@ function Show-Crashes {
         $t.Text = ((@($script:crash.logs) | ForEach-Object { (When $_.t) + "`r`n" + $_.x }) -join "`r`n`r`n──────────`r`n`r`n")
         [void]$d.panel.Children.Add($t); $d.t = $t
         [void](Add-Btn $d 'העתק הכול' $false { param($x) [Windows.Clipboard]::SetText($x.t.Text); Say 'היומנים הועתקו. אפשר להדביק ל-Claude.' })
+        foreach ($l in @($script:crash.logs)) { # S-156: fixed - hide this log for good
+            $b = Add-Btn $d ('✓ טופל - הסתר את היומן מ-' + (When $l.t)) $false {
+                param($x, $v)
+                $script:crash.logs = @($script:crash.logs | Where-Object { [int64]$_.t -ne [int64]$v.t })
+                $script:crash.handled = @(@($script:crash.handled) + [int64]$v.t | Select-Object -Last 200)
+                Save-Crash; $v.btn.Visibility = 'Collapsed'
+                $x.t.Text = ((@($script:crash.logs) | ForEach-Object { (When $_.t) + "`r`n" + $_.x }) -join "`r`n`r`n──────────`r`n`r`n")
+                if (@($script:crash.logs).Count -eq 0) { Close-Dlg $x $null }
+            } $Green
+            $b.Tag.v = @{ t = $l.t; btn = $b }
+        }
         [void](Add-Btn $d 'נקה את כל היומנים' $false { param($x) $script:crash.logs = @(); Save-Crash; Close-Dlg $x $null } $Red)
     }
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
