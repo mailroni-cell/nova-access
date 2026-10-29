@@ -15,9 +15,10 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-155 2026-10-29 (Claude Opus 5.5, thread "קרא MD והמשך"): install journey shared with the phone (admin.enc inv / invVia / inst).
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 1
+$PcVersion = 2
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -170,6 +171,7 @@ function New-U($s) {
         id = [string]$s.id; name = [string]$s.name; pretty = [string]$s.pretty; d = [string]$s.d; date = [string](Prop $s 'date' '')
         active = [bool](Prop $s 'active' $true); phone = [string](Prop $s 'phone' ''); mail = [string](Prop $s 'mail' '')
         mod = [int64](Prop $s 'mod' 0); del = [bool](Prop $s 'del' $false); x = [int64](Prop $s 'x' 0); adm = [bool](Prop $s 'adm' $false)
+        inv = [int64](Prop $s 'inv' 0); invVia = [string](Prop $s 'invVia' ''); inst = [int64](Prop $s 'inst' 0)   # S-155
     }
 }
 function New-Cfg($s) { return [pscustomobject]@{ server = [string](Prop $s 'server' ''); link = [string](Prop $s 'link' $DefaultLink); dlcode = [string](Prop $s 'dlcode' '') } }
@@ -191,7 +193,7 @@ function Load-Remote {
 }
 function List-Json($users, $cfg) {
     $u = @($users | ForEach-Object { [ordered]@{ id = $_.id; name = $_.name; pretty = $_.pretty; d = $_.d; date = $_.date; active = [bool]$_.active
-        phone = $_.phone; mail = $_.mail; mod = [int64]$_.mod; del = [bool]$_.del; x = [int64]$_.x; adm = [bool]$_.adm } })
+        phone = $_.phone; mail = $_.mail; mod = [int64]$_.mod; del = [bool]$_.del; x = [int64]$_.x; adm = [bool]$_.adm; inv = [int64]$_.inv; invVia = $_.invVia; inst = [int64]$_.inst } })
     return (ConvertTo-Json -InputObject ([ordered]@{ users = $u; cfg = [ordered]@{ server = $cfg.server; link = $cfg.link; dlcode = $cfg.dlcode } }) -Depth 6 -Compress)
 }
 function Save-Remote($users, $cfg, $sha) {
@@ -263,7 +265,28 @@ function Inst($id) {
     return $script:inst[$id]
 }
 function Save-Inst { try { Write-Text $instFile (ConvertTo-Json -InputObject $script:inst -Depth 6 -Compress) } catch { } }
-function Invited($u, $via) { $i = Inst $u.id; $i.i = Now-S; $i.v = $via; Save-Inst }
+# S-155: the invitation goes into the shared list too, so the phone sees it
+function Invited($u, $via) {
+    $i = Inst $u.id; $i.i = Now-S; $i.v = $via; Save-Inst
+    $id = $u.id; $at = [int64]$i.i
+    try { Change { param($L) $x = Find $L.users $id; if ($x) { $x.inv = $at; $x.invVia = $via; $x.mod = Now-Ms } } } catch { }
+}
+# S-155: one journey for the phone and the PC: local devices + the shared invitation / first activation
+function Journey($u) {
+    $l = Inst $u.id
+    $j = [pscustomobject]@{ i = [int64]$l.i; v = [string]$l.v; f = [int64]$l.f; l = [int64]$l.l; d = $l.d }
+    if ([int64]$u.inv -gt $j.i) { $j.i = [int64]$u.inv; $j.v = $u.invVia }
+    if ([int64]$u.inst -gt 0 -and ($j.f -eq 0 -or [int64]$u.inst -lt $j.f)) { $j.f = [int64]$u.inst }
+    if ($j.f -gt $j.l) { $j.l = $j.f }
+    return $j
+}
+# S-155: first activations seen here go into the shared list once (the earliest one wins)
+function Share-FirstSeen {
+    $due = @{}
+    foreach ($u in $script:users) { $f = [int64](Inst $u.id).f; if ($f -gt 0 -and ($u.inst -eq 0 -or $f -lt $u.inst)) { $due[$u.id] = $f } }
+    if ($due.Count -eq 0 -or $script:busy) { return }
+    try { Change { param($L) foreach ($x in $L.users) { $f = $due[$x.id]; if ($f -and ($x.inst -eq 0 -or $f -lt $x.inst)) { $x.inst = $f; $x.mod = Now-Ms } } } } catch { }
+}
 function Inst-Seen($id, $reports) {
     if (-not $reports -or $reports.Count -eq 0) { return }
     $i = Inst $id
@@ -349,6 +372,7 @@ function Check-Presence {
         }
         Save-Inst
         if ($script:users.Count) { $script:historyRead = $true }
+        Share-FirstSeen
     } $null
 }
 function Check-Crashes {
@@ -396,7 +420,7 @@ function Status-Of($u) {
 }
 function Inst-MaxVer($i) { $m = 0; foreach ($p in $i.d.PSObject.Properties) { if ([int]$p.Value.ver -gt $m) { $m = [int]$p.Value.ver } }; return $m }
 function Install-Tag($u) {
-    $i = Inst $u.id
+    $i = Journey $u
     if ([int64]$i.f -gt 0) { $v = Inst-MaxVer $i; $t = '✔ מותקן'; if ($v -gt 0) { $t += " · $($v - 1)" }; return @($Green, $t) }
     if ([int64]$i.i -gt 0) { return @($Orange, '⏳ הוזמן · טרם הותקן') }
     return @($Muted, 'טרם נשלחה הזמנה')
@@ -682,9 +706,9 @@ function Show-Card {
     $sn = Shared-Note $u
     $ui.CShared.Text = $sn; $ui.CShared.Visibility = $(if ($sn) { 'Visible' } else { 'Collapsed' }); $ui.BShared.Visibility = $ui.CShared.Visibility
     $ui.CSteps.Children.Clear()
-    $i = Inst $u.id
+    $i = Journey $u
     Step $true "הקוד נוצר · $($u.date)"
-    if ([int64]$i.i -gt 0) { Step $true ("הזמנה נשלחה" + $(if ($i.v) { " ב$($i.v)" } else { '' }) + " · $(When $i.i)") } else { Step $false 'הזמנה עוד לא נשלחה מהמחשב הזה' }
+    if ([int64]$i.i -gt 0) { Step $true ("הזמנה נשלחה" + $(if ($i.v) { " ב$($i.v)" } else { '' }) + " · $(When $i.i)") } else { Step $false 'הזמנה עוד לא נשלחה' }
     if ([int64]$i.f -gt 0) { Step $true "NOVA הותקנה והקוד הופעל · $(When $i.f)" } else { Step $false 'NOVA עוד לא נפתחה עם הקוד' }
     foreach ($p in @($i.d.PSObject.Properties | Sort-Object -Property { [int64]$_.Value.at } -Descending)) {
         $d = $p.Value; $v = [int]$d.ver
@@ -898,7 +922,7 @@ $ui.BNewCode.Add_Click({
             $o = Open-Box (CodeKey (Normalize $x.pretty)) $x.d
             if (-not $o) { throw "לא הצלחתי לפתוח את הפרטים של $nm." }
             $code = New-Code @($L.users | ForEach-Object { $_.id })
-            $n = New-U $x; $n.id = IdOf $code; $n.pretty = Pretty $code; $n.d = Seal (CodeKey $code) $o; $n.date = Get-Date -Format 'yyyy-MM-dd HH:mm'; $n.mod = Now-Ms
+            $n = New-U $x; $n.id = IdOf $code; $n.pretty = Pretty $code; $n.d = Seal (CodeKey $code) $o; $n.date = Get-Date -Format 'yyyy-MM-dd HH:mm'; $n.mod = Now-Ms; $n.inv = 0; $n.invVia = ''; $n.inst = 0
             $x.del = $true; $x.active = $false; $x.mod = Now-Ms
             $L.users = @($n) + @($L.users); $script:newId = $n.id
         }
