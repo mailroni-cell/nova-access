@@ -15,11 +15,12 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-158 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): message log + receipts (shown / closed), like Admin 236 on the phone.
 # Updated S-155 2026-10-29 (Claude Opus 5.5, thread "קרא MD והמשך"): install journey shared with the phone (admin.enc inv / invVia / inst).
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 3
+$PcVersion = 4
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -127,6 +128,7 @@ function Cmd-Topic($code) { return 'nova-c' + (H24 "cmd|$Salt|$code") }
 function Code-Tag($code) { return (H24 "tag|$Salt|$code").Substring(0, 12) }
 $PresenceTopic = 'nova-p' + (H24 "presence|$Salt")
 $CrashTopic    = 'nova-x' + (H24 "crash|$Salt")
+$ReceiptTopic  = 'nova-r' + (H24 "receipt|$Salt")   # S-158: r1|<code tag>|<message id>|<s / c>|<device>|<model>
 function Ntfy-Post($topic, $body) {
     try { Invoke-WebRequest -UseBasicParsing -Method Post -Uri ('https://ntfy.sh/' + $topic) -Body $utf8.GetBytes($body) -TimeoutSec 15 | Out-Null; return $true } catch { return $false }
 }
@@ -175,8 +177,15 @@ function New-U($s) {
         inv = [int64](Prop $s 'inv' 0); invVia = [string](Prop $s 'invVia' ''); inst = [int64](Prop $s 'inst' 0)   # S-155
     }
 }
+# S-158 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): one message in the shared log (SentMsg in AdminData.kt).
+function New-Map($o) { $m = [ordered]@{}; if ($o) { foreach ($p in $o.PSObject.Properties) { $m[$p.Name] = [int64]$p.Value } }; return $m }
+function New-M($s) {
+    return [pscustomobject]@{ id = [string](Prop $s 'id' ''); at = [int64](Prop $s 'at' 0); text = [string](Prop $s 'text' ''); to = @(@(Prop $s 'to' @()) | Where-Object { $_ } | ForEach-Object { [string]$_ })
+        all = [bool](Prop $s 'all' $false); via = [string](Prop $s 'via' ''); seen = (New-Map (Prop $s 'seen' $null)); ok = (New-Map (Prop $s 'ok' $null)) }
+}
+function M-Json($m) { return [ordered]@{ id = $m.id; at = [int64]$m.at; text = $m.text; to = [object[]]@($m.to); all = [bool]$m.all; via = $m.via; seen = $m.seen; ok = $m.ok } }
 function New-Cfg($s) { return [pscustomobject]@{ server = [string](Prop $s 'server' ''); link = [string](Prop $s 'link' $DefaultLink); dlcode = [string](Prop $s 'dlcode' '') } }
-$script:users = @(); $script:cfg = New-Cfg $null; $script:salt = $null; $script:akey = $null; $script:akeyFor = $null
+$script:users = @(); $script:msgs = @(); $script:cfg = New-Cfg $null; $script:salt = $null; $script:akey = $null; $script:akeyFor = $null
 function Admin-Key([byte[]]$salt) {
     $pw = Get-Sync
     $tag = $pw + '|' + [Convert]::ToBase64String($salt)
@@ -185,21 +194,22 @@ function Admin-Key([byte[]]$salt) {
 }
 function Load-Remote {
     $f = Gh-Get 'admin.enc'
-    if (-not $f) { return [pscustomobject]@{ users = @(); cfg = (New-Cfg $null); sha = $null } }
+    if (-not $f) { return [pscustomobject]@{ users = @(); cfg = (New-Cfg $null); msgs = @(); sha = $null } }
     $s = $f.text | ConvertFrom-Json
     $plain = Open-Box (Admin-Key ([Convert]::FromBase64String($s.salt))) $s.d
     if (-not $plain) { throw 'SYNC_PASSWORD' }
     $l = $plain | ConvertFrom-Json
-    return [pscustomobject]@{ users = @(@($l.users) | Where-Object { $_ } | ForEach-Object { New-U $_ }); cfg = (New-Cfg $l.cfg); sha = $f.sha }
+    return [pscustomobject]@{ users = @(@($l.users) | Where-Object { $_ } | ForEach-Object { New-U $_ }); cfg = (New-Cfg $l.cfg); msgs = @(@(Prop $l 'msgs' @()) | Where-Object { $_ } | ForEach-Object { New-M $_ }); sha = $f.sha }
 }
-function List-Json($users, $cfg) {
+function List-Json($users, $cfg, $msgs) {
     $u = @($users | ForEach-Object { [ordered]@{ id = $_.id; name = $_.name; pretty = $_.pretty; d = $_.d; date = $_.date; active = [bool]$_.active
         phone = $_.phone; mail = $_.mail; mod = [int64]$_.mod; del = [bool]$_.del; x = [int64]$_.x; adm = [bool]$_.adm; inv = [int64]$_.inv; invVia = $_.invVia; inst = [int64]$_.inst } })
-    return (ConvertTo-Json -InputObject ([ordered]@{ users = $u; cfg = [ordered]@{ server = $cfg.server; link = $cfg.link; dlcode = $cfg.dlcode } }) -Depth 6 -Compress)
+    $m = [object[]]@(@($msgs) | Where-Object { $_ } | ForEach-Object { M-Json $_ })   # S-158: the message log rides along
+    return (ConvertTo-Json -InputObject ([ordered]@{ users = $u; cfg = [ordered]@{ server = $cfg.server; link = $cfg.link; dlcode = $cfg.dlcode }; msgs = $m }) -Depth 8 -Compress)
 }
-function Save-Remote($users, $cfg, $sha) {
+function Save-Remote($users, $cfg, $msgs, $sha) {
     if (-not $script:salt) { $b = New-Object byte[] 16; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $script:salt = $b }
-    $box = Seal (Admin-Key $script:salt) (List-Json $users $cfg)
+    $box = Seal (Admin-Key $script:salt) (List-Json $users $cfg $msgs)
     $file = ConvertTo-Json -InputObject ([ordered]@{ v = 1; salt = [Convert]::ToBase64String([byte[]]$script:salt); d = $box }) -Compress
     return (Gh-Put 'admin.enc' $file $sha 'NOVA admin (PC): update list')
 }
@@ -209,19 +219,19 @@ function Merge-Users($remote, $local) {
     foreach ($u in @($remote) + @($local)) { if (-not $u) { continue }; if (-not $by.Contains($u.id) -or [int64]$u.mod -gt [int64]$by[$u.id].mod) { $by[$u.id] = $u } }
     return @($by.Values | Sort-Object -Property date -Descending | ForEach-Object { New-U $_ })
 }
-function Save-Cache { try { Write-Text $cacheFile (Protect (List-Json $script:users $script:cfg)) } catch { } }
+function Save-Cache { try { Write-Text $cacheFile (Protect (List-Json $script:users $script:cfg $script:msgs)) } catch { } }
 function Load-Cache {
-    try { $l = (Unprotect (Read-Text $cacheFile)) | ConvertFrom-Json; $script:users = @(@($l.users) | Where-Object { $_ } | ForEach-Object { New-U $_ }); $script:cfg = New-Cfg $l.cfg } catch { }
+    try { $l = (Unprotect (Read-Text $cacheFile)) | ConvertFrom-Json; $script:users = @(@($l.users) | Where-Object { $_ } | ForEach-Object { New-U $_ }); $script:cfg = New-Cfg $l.cfg; $script:msgs = @(@(Prop $l 'msgs' @()) | Where-Object { $_ } | ForEach-Object { New-M $_ }) } catch { }
 }
 function Find($users, $id) { return ($users | Where-Object { $_.id -eq $id } | Select-Object -First 1) }
 # read the newest admin.enc, apply $edit on top (it gets $L with .users / .cfg), write it back (retry if the phone wrote in between), then codes.json
 function Change([scriptblock]$edit) {
     for ($i = 0; $i -lt 3; $i++) {
         $now = Load-Remote
-        $L = [pscustomobject]@{ users = (Merge-Users $now.users $script:users); cfg = $now.cfg }
+        $L = [pscustomobject]@{ users = (Merge-Users $now.users $script:users); cfg = $now.cfg; msgs = @($now.msgs) }
         & $edit $L
-        if (Save-Remote $L.users $L.cfg $now.sha) {
-            $script:users = @($L.users); $script:cfg = $L.cfg; Save-Cache
+        if (Save-Remote $L.users $L.cfg $L.msgs $now.sha) {
+            $script:users = @($L.users); $script:cfg = $L.cfg; $script:msgs = @($L.msgs); Save-Cache
             Publish-Codes $L.users
             return
         }
@@ -395,6 +405,48 @@ function Check-Crashes {
     } $null
 }
 
+# S-158 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): receipts the screens sent (shown / closed) go into the shared
+# log once (the earliest time wins); ntfy keeps them about 12 hours, so the phone or the PC that opens later still catches them.
+function Apply-Receipts($msgs, $got) {
+    $changed = $false
+    foreach ($m in @($msgs)) {
+        foreach ($r in $got) {
+            if ($r.msg -ne $m.id -or -not ($m.to -contains $r.user)) { continue }
+            if (-not $m.seen.Contains($r.user) -or [int64]$m.seen[$r.user] -gt $r.at) { $m.seen[$r.user] = $r.at; $changed = $true }
+            if ($r.closed -and (-not $m.ok.Contains($r.user) -or [int64]$m.ok[$r.user] -gt $r.at)) { $m.ok[$r.user] = $r.at; $changed = $true }
+        }
+    }
+    return $changed
+}
+function Check-Receipts {
+    if (-not @($script:msgs).Count) { return }
+    Fetch ("https://ntfy.sh/$ReceiptTopic/json?poll=1&since=" + ((Now-S) - 12 * 3600)) {
+        param($text)
+        if (-not $text -or $script:busy) { return }
+        $byTag = @{}; foreach ($u in $script:users) { $byTag[(Code-Tag (Normalize $u.pretty))] = $u.id }
+        $got = @(foreach ($m in (Ntfy-Parse $text)) {
+            $f = $m.body -split '\|'
+            if ($f.Count -lt 4 -or $f[0] -ne 'r1' -or -not $byTag.ContainsKey($f[1])) { continue }
+            [pscustomobject]@{ user = $byTag[$f[1]]; msg = $f[2]; closed = ($f[3] -eq 'c'); at = $m.at }
+        })
+        if (-not $got.Count) { return }
+        $copy = @($script:msgs | ForEach-Object { New-M (M-Json $_ | ConvertTo-Json -Depth 4 | ConvertFrom-Json) })
+        if (-not (Apply-Receipts $copy $got)) { return }
+        try { Change { param($L) [void](Apply-Receipts $L.msgs $got) } } catch { }   # quiet, like Share-FirstSeen
+    } $null
+}
+function Msg-State($m, $id) {
+    if ($m.ok.Contains($id)) { return @($Green, "✉ אושרה $(When $m.ok[$id])") }
+    if ($m.seen.Contains($id)) { return @($Gold, '✉ על המסך · עוד לא נסגרה') }
+    return @($Orange, '✉ ממתינה')
+}
+function Msg-Counts($m) {
+    $ok = @($m.to | Where-Object { $m.ok.Contains($_) }).Count
+    $seen = @($m.to | Where-Object { -not $m.ok.Contains($_) -and $m.seen.Contains($_) }).Count
+    return "אישרו $ok · על המסך $seen · ממתינים $(@($m.to).Count - $ok - $seen) (מתוך $(@($m.to).Count))"
+}
+function Last-Msg($u) { return (@($script:msgs) | Where-Object { $_.to -contains $u.id } | Select-Object -First 1) }
+
 # ── texts like the phone ─────────────────────────────────────────────────────
 function Invite-Text($u) {
     $link = if ($script:cfg.link) { $script:cfg.link } else { $DefaultLink }
@@ -489,6 +541,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
           <Button x:Name="BNew" Content="+ משתמש חדש" Style="{StaticResource Gold}"/>
           <Button x:Name="BAll" Content="✉ הודעה לכל המשתמשים" Style="{StaticResource Ghost}"/>
+          <Button x:Name="BLog" Content="📜 יומן הודעות" Style="{StaticResource Ghost}"/>
           <Button x:Name="BCrash" Content="יומני קריסה" Style="{StaticResource Ghost}"/>
           <Button x:Name="BRefresh" Content="⟳ רענן" Style="{StaticResource Ghost}"/>
           <Button x:Name="BSettings" Content="⚙ הגדרות" Style="{StaticResource Ghost}"/>
@@ -509,6 +562,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
             </UniformGrid>
             <TextBlock x:Name="Load" FontWeight="Bold" Margin="4,8,4,0" Visibility="Collapsed"/>
             <TextBlock x:Name="SharedAll" FontWeight="Bold" Foreground="#F5A35B" Margin="4,4,4,0" Visibility="Collapsed"/>
+            <TextBlock x:Name="MsgAll" Foreground="#A8A8B8" FontSize="13" Margin="4,4,4,0" TextWrapping="Wrap" Visibility="Collapsed"/>
             <Grid Margin="0,10,0,0">
               <TextBox x:Name="Search"/>
               <TextBlock x:Name="SearchHint" Text="🔍 חיפוש לפי שם או טלפון" Foreground="#8A8A98" Margin="12,8" IsHitTestVisible="False"/>
@@ -527,6 +581,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
                   <TextBlock Text="{Binding Name}" Foreground="{Binding NameFg}" FontSize="16" FontWeight="SemiBold"/>
                   <TextBlock Text="{Binding Sub}" Foreground="{Binding SubFg}" FontSize="13"/>
                   <TextBlock Text="{Binding Extra}" Foreground="{Binding ExtraFg}" FontSize="12" Visibility="{Binding ExtraVis}" TextWrapping="Wrap"/>
+                  <TextBlock Text="{Binding Msg}" Foreground="{Binding MsgFg}" FontSize="12" FontWeight="Bold" Visibility="{Binding MsgVis}"/>
                 </StackPanel>
               </DockPanel>
             </DataTemplate></ListBox.ItemTemplate>
@@ -549,6 +604,14 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
               <StackPanel>
                 <TextBlock Text="מסע ההתקנה" Foreground="#F5C76B" FontWeight="Bold" Margin="0,0,0,6"/>
                 <StackPanel x:Name="CSteps"/>
+              </StackPanel>
+            </Border>
+            <Border x:Name="CMsgBox" Background="#121620" CornerRadius="14" Padding="16,12" Margin="0,12,0,0" Visibility="Collapsed">
+              <StackPanel>
+                <TextBlock Text="✉ הודעה אחרונה" Foreground="#F5C76B" FontWeight="Bold" Margin="0,0,0,4"/>
+                <TextBlock x:Name="CMsgText" Foreground="#A8A8B8" FontSize="13" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                <StackPanel x:Name="CMsgSteps"/>
+                <Button x:Name="BMsgLog" Content="📜 כל ההודעות שלו" Style="{StaticResource Ghost}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
               </StackPanel>
             </Border>
             <Button x:Name="BRemind" Content="🔔 שלח תזכורת להתקנה" Style="{StaticResource Gold}" HorizontalAlignment="Left" Margin="4,10,4,0" Visibility="Collapsed"/>
@@ -641,9 +704,9 @@ function Load-All {
     if (-not (Ready)) { Say 'צריך מפתח GitHub וסיסמת סנכרון (אותה סיסמה כמו בטלפון). לחץ ⚙ הגדרות.'; return }
     Work {
         $r = Load-Remote
-        $script:users = @(Merge-Users $r.users @()); $script:cfg = $r.cfg; Save-Cache
+        $script:users = @(Merge-Users $r.users @()); $script:cfg = $r.cfg; $script:msgs = @($r.msgs); Save-Cache
         $ui.SyncState.Text = 'מחשב · מסונכרן עם הטלפון ✔'
-        Check-Live; Check-Presence; Check-Crashes
+        Check-Live; Check-Presence; Check-Crashes; Check-Receipts
     } 'הכול מעודכן.'
 }
 
@@ -664,6 +727,9 @@ function Refresh-UI {
     } else { $ui.Load.Visibility = 'Collapsed' }
     $sh = @($all | Where-Object { @($script:devices[$_.id] | Where-Object { $_ }).Count -gt 1 }).Count
     if ($sh) { $ui.SharedAll.Text = "⚠ $sh $(if ($sh -eq 1) { 'קוד פתוח' } else { 'קודים פתוחים' }) ביותר ממכשיר אחד כרגע"; $ui.SharedAll.Visibility = 'Visible' } else { $ui.SharedAll.Visibility = 'Collapsed' }
+    $ga = @($script:msgs) | Where-Object { $_.all } | Select-Object -First 1   # S-158
+    if ($ga) { $ui.MsgAll.Text = '✉ הודעה אחרונה לכולם: ' + (Msg-Counts $ga); $ui.MsgAll.Visibility = 'Visible' } else { $ui.MsgAll.Visibility = 'Collapsed' }
+    $ui.BLog.Content = "📜 יומן הודעות ($(@($script:msgs).Count))"
     $cu = Crash-Unread
     $ui.BCrash.Content = $(if ($cu -gt 0) { "⚠ יומני קריסה: $cu חדשים" } else { "יומני קריסה ($(@($script:crash.logs).Count))" })
     $ui.BCrash.Foreground = Brush $(if ($cu -gt 0) { $Orange } else { '#EDEDF2' })
@@ -678,10 +744,12 @@ function Refresh-UI {
         $l = $script:live[$u.id]; if ($l -and $l.exp) { $ex += "בתוקף עד $(Day $l.exp)" }
         if ($u.x -gt 0) { $ex += "NOVA עד $(Day $u.x)"; if (Expired $u) { $exc = $Red } }
         $sn = Shared-Note $u; if ($sn) { $ex += $sn; $exc = $Orange }
+        $lm = Last-Msg $u; $ms = $(if ($lm) { Msg-State $lm $u.id } else { @($Muted, '') })   # S-158
         $tagBg = $(if ($tg[0] -eq $Green) { '#1F3A2A' } elseif ($tg[0] -eq $Orange) { '#3A321F' } else { '#252830' })
         [pscustomobject]@{ Id = $u.id; Name = $(if ($adm) { "👑 $($u.name)" } else { $u.name }); NameFg = $(if ($adm) { $Gold } else { '#FFFFFF' })
             Sub = $st[1]; SubFg = $st[0]; Tag = $tg[1]; TagFg = $tg[0]; TagBg = $tagBg; Code = ($u.pretty -replace '-', '')
-            Extra = ($ex -join "`n"); ExtraFg = $exc; ExtraVis = $(if ($ex.Count) { 'Visible' } else { 'Collapsed' }) }
+            Extra = ($ex -join "`n"); ExtraFg = $exc; ExtraVis = $(if ($ex.Count) { 'Visible' } else { 'Collapsed' })
+            Msg = $ms[1]; MsgFg = $ms[0]; MsgVis = $(if ($lm) { 'Visible' } else { 'Collapsed' }) }
     })
     $script:refreshing = $true
     $ui.List.ItemsSource = $rows
@@ -695,6 +763,10 @@ function Step($done, $text) {
     $t.Foreground = Brush $(if ($done) { $Green } else { $Muted }); [void]$ui.CSteps.Children.Add($t)
 }
 function Line($text, $color) { $t = New-Object Windows.Controls.TextBlock; $t.Text = $text; $t.FontSize = 13; $t.Margin = (New-Object Windows.Thickness(0,2,0,2)); $t.Foreground = Brush $color; [void]$ui.CSteps.Children.Add($t) }
+function Msg-Line($done, $text, $color) {
+    $t = New-Object Windows.Controls.TextBlock; $t.Text = $(if ($done) { '✔ ' } else { '○ ' }) + $text; $t.FontSize = 13; $t.Margin = (New-Object Windows.Thickness(0,2,0,2))
+    $t.Foreground = Brush $color; if ($done -and $text.StartsWith('אושרה')) { $t.FontWeight = [Windows.FontWeights]::Bold }; [void]$ui.CMsgSteps.Children.Add($t)
+}
 function Show-Card {
     $u = Cur
     if (-not $u -or $u.del) { $ui.Card.Visibility = 'Collapsed'; $ui.Pick.Visibility = 'Visible'; return }
@@ -720,6 +792,15 @@ function Show-Card {
         Line ("    " + $(if ($d.tv) { '📺' } else { '📱' }) + " " + $(if ($d.m) { $d.m } else { 'מכשיר' }) + " · $vt") $Muted
     }
     if ([int64]$i.l -gt 0) { Line "🕒 נראה לאחרונה: $(When $i.l)" '#FFFFFF' }
+    # S-158: the last screen message to this user: sent, shown on the screen, "סגור" pressed
+    $lm = Last-Msg $u; $ui.CMsgSteps.Children.Clear()
+    if ($lm) {
+        $ui.CMsgBox.Visibility = 'Visible'; $ui.CMsgText.Text = '"' + $(if ($lm.text.Length -gt 120) { $lm.text.Substring(0, 120) } else { $lm.text }) + '"'
+        Msg-Line $true ("נשלחה · $(When $lm.at)" + $(if ($lm.via) { " · מה$($lm.via)" } else { '' })) $Green
+        if ($lm.seen.Contains($u.id)) { Msg-Line $true "הופיעה על המסך · $(When $lm.seen[$u.id])" $Green } else { Msg-Line $false 'עוד לא הופיעה על המסך' $Orange }
+        if ($lm.ok.Contains($u.id)) { Msg-Line $true "אושרה (נלחץ `"סגור`") · $(When $lm.ok[$u.id])" $Green } elseif ($lm.seen.Contains($u.id)) { Msg-Line $false 'עוד לא נלחץ "סגור"' $Gold }
+        $ui.BMsgLog.Content = "📜 כל ההודעות שלו ($(@($script:msgs | Where-Object { $_.to -contains $u.id }).Count))"
+    } else { $ui.CMsgBox.Visibility = 'Collapsed' }
     $ui.BRemind.Visibility = $(if ([int64]$i.f -eq 0 -and [int64]$i.i -gt 0 -and (Now-S) - [int64]$i.i -gt 2 * 86400) { 'Visible' } else { 'Collapsed' })
     $ui.BAdmin.Content = $(if ($adm) { '👑 קוד מנהל: פעיל (לחץ להחזיר למשתמש רגיל)' } else { '👑 הפוך לקוד מנהל שלי' })
     $ui.BExpiry.Content = $(if ($u.x -gt 0) { "📅 תוקף החשבון: עד $(Day $u.x)" } else { '📅 תוקף החשבון: ללא הגבלה' })
@@ -755,7 +836,9 @@ function Send-Message($targets, $text) {
     $ids = @($targets | Where-Object { $_.active -and -not $_.del } | ForEach-Object { $_.id })
     $mi = [string](Now-Ms)
     $ok = $(if ($ids.Count -eq 1) { 'ההודעה נשלחה. היא תופיע על המסך שלו בתוך כ-3 דקות (רק בטלוויזיה שמחוברת בקוד הזה).' } else { "ההודעה נשלחה ל-$($ids.Count) משתמשים. היא תופיע על המסכים בתוך כ-3 דקות." })
-    Work { Change { param($L) foreach ($x in $L.users) { if ($ids -contains $x.id) { $x.d = Reseal $x @{ m = $t; mi = $mi }; $x.mod = Now-Ms } } } } $ok
+    $sent = New-M ([pscustomobject]@{ id = $mi; at = (Now-S); text = $t; to = $ids; all = (@($targets).Count -gt 1); via = 'מחשב' })   # S-158: into the shared log
+    Work { Change { param($L) foreach ($x in $L.users) { if ($ids -contains $x.id) { $x.d = Reseal $x @{ m = $t; mi = $mi }; $x.mod = Now-Ms } }
+        $L.msgs = @(@($sent) + @($L.msgs | Where-Object { $_.id -ne $mi }) | Select-Object -First 50) } } $ok
 }
 function New-User {
     $d = New-Dialog 'משתמש חדש'
@@ -821,6 +904,35 @@ function Show-Reveal($u) {
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
     [void]$d.win.ShowDialog()
 }
+# S-158 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): the message log, newest first ($uid = one user's messages only).
+function Show-MsgLog($uid) {
+    $names = @{}; foreach ($u in $script:users) { $names[$u.id] = $u.name }
+    $list = @(@($script:msgs) | Where-Object { -not $uid -or $_.to -contains $uid })
+    $d = New-Dialog $(if ($uid) { "ההודעות של $($names[$uid])" } else { 'יומן הודעות' })
+    $sv = New-Object Windows.Controls.ScrollViewer; $sv.MaxHeight = 480; $sv.VerticalScrollBarVisibility = 'Auto'
+    $box = New-Object Windows.Controls.StackPanel; $sv.Content = $box; [void]$d.panel.Children.Add($sv)
+    function T($text, $color, $size, $bold) { $t = New-Object Windows.Controls.TextBlock; $t.Text = $text; $t.TextWrapping = 'Wrap'; $t.FontSize = $size; $t.Foreground = Brush $color; if ($bold) { $t.FontWeight = [Windows.FontWeights]::Bold }; return $t }
+    if (-not $list.Count) { [void]$box.Children.Add((T 'אין הודעות ביומן.' $Muted 14 $false)) }
+    foreach ($g in $list) {
+        $b = New-Object Windows.Controls.Border; $b.Background = Brush '#0B0D12'; $b.CornerRadius = 12; $b.Padding = (New-Object Windows.Thickness(12,10,12,10)); $b.Margin = (New-Object Windows.Thickness(0,0,0,10))
+        $p = New-Object Windows.Controls.StackPanel; $b.Child = $p
+        $to = $(if ($g.all) { "לכל המשתמשים ($(@($g.to).Count))" } else { (@($g.to) | ForEach-Object { $(if ($names.ContainsKey($_)) { $names[$_] } else { 'משתמש שנמחק' }) }) -join ', ' })
+        [void]$p.Children.Add((T ("$(When $g.at)" + $(if ($g.via) { " · מה$($g.via)" } else { '' }) + " · $to") $Muted 12 $false))
+        $tx = T $g.text '#FFFFFF' 14 $false; $tx.Margin = (New-Object Windows.Thickness(0,4,0,4)); [void]$p.Children.Add($tx)
+        $one = $(if ($uid) { $uid } elseif (@($g.to).Count -eq 1) { @($g.to)[0] } else { $null })
+        if ($one) { $st = Msg-State $g $one; [void]$p.Children.Add((T $st[1] $st[0] 12 $true)) }
+        else {
+            [void]$p.Children.Add((T (Msg-Counts $g) $Gold 12 $true))
+            foreach ($id in @(@($g.to) | Sort-Object { if ($g.ok.Contains($_)) { 2 } elseif ($g.seen.Contains($_)) { 1 } else { 0 } })) {
+                $st = Msg-State $g $id; [void]$p.Children.Add((T ("$(if ($names.ContainsKey($id)) { $names[$id] } else { 'משתמש שנמחק' }): $($st[1])") $st[0] 12 $false))
+            }
+        }
+        [void]$box.Children.Add($b)
+    }
+    [void](Add-Text $d 'אישור מגיע רק מטלוויזיות עם NOVA מעודכנת. הודעות מלפני העדכון לא ביומן.' $null)
+    [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
+    [void]$d.win.ShowDialog()
+}
 function Show-Crashes {
     $d = New-Dialog 'יומני קריסה מהטלוויזיות'
     if (@($script:crash.logs).Count -eq 0) { [void](Add-Text $d 'אין יומני קריסה.' $null) }
@@ -883,6 +995,8 @@ $ui.Search.Add_TextChanged({ $ui.SearchHint.Visibility = $(if ($ui.Search.Text) 
 $ui.BNew.Add_Click({ if (Ready) { New-User } else { Show-Settings } })
 $ui.BAll.Add_Click({ $t = Ask 'הודעה לכל המשתמשים' 'ההודעה תופיע על המסך של כל המשתמשים הפעילים.' '' $false $true 'שלח'; if ($t) { Send-Message (Shown-Users) $t } })
 $ui.BCrash.Add_Click({ Show-Crashes })
+$ui.BLog.Add_Click({ Show-MsgLog $null })   # S-158
+$ui.BMsgLog.Add_Click({ $u = Cur; if ($u) { Show-MsgLog $u.id } })
 $ui.BRefresh.Add_Click({ Load-All })
 $ui.BSettings.Add_Click({ Show-Settings })
 $ui.BWhats.Add_Click({ $u = Cur; if ($u) { Send-Whats $u '' } })
@@ -990,7 +1104,7 @@ $script:minutes = 0
 $minute.Add_Tick({
     if (-not (Ready) -or $script:busy) { return }
     $script:minutes++
-    Check-Presence; Check-Crashes
+    Check-Presence; Check-Crashes; Check-Receipts   # S-158
     if ($script:minutes % 5 -eq 0) { Check-Live }
 })
 $minute.Start()
