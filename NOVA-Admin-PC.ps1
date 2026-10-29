@@ -15,12 +15,13 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-159 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): presence window 25 minutes, "x" = NOVA closed (ntfy.sh 250 messages a day per home).
 # Updated S-158 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): message log + receipts (shown / closed), like Admin 236 on the phone.
 # Updated S-155 2026-10-29 (Claude Opus 5.5, thread "קרא MD והמשך"): install journey shared with the phone (admin.enc inv / invVia / inst).
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 4
+$PcVersion = 5
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -127,6 +128,7 @@ function H24($s) { return (Sha $s).Substring(0, 24) }
 function Cmd-Topic($code) { return 'nova-c' + (H24 "cmd|$Salt|$code") }
 function Code-Tag($code) { return (H24 "tag|$Salt|$code").Substring(0, 12) }
 $PresenceTopic = 'nova-p' + (H24 "presence|$Salt")
+$PresenceWindow = 1500   # S-159: NOVA reports on a change + every 20 minutes (ntfy.sh 250 messages a day per home); "x" = closed
 $CrashTopic    = 'nova-x' + (H24 "crash|$Salt")
 $ReceiptTopic  = 'nova-r' + (H24 "receipt|$Salt")   # S-158: r1|<code tag>|<message id>|<s / c>|<device>|<model>
 function Ntfy-Post($topic, $body) {
@@ -358,7 +360,7 @@ function Check-Live {
 }
 function Check-Presence {
     $now = Now-S
-    $since = if ($script:historyRead) { $now - 180 } else { $now - 12 * 3600 }
+    $since = if ($script:historyRead) { $now - $PresenceWindow } else { $now - 12 * 3600 }
     if (-not $script:historyRead) {
         Fetch ("https://raw.githubusercontent.com/$Repo/main/version.json?t=$now") { param($text) if ($text) { try { $script:novaLatest = [int](($text | ConvertFrom-Json).versionCode) } catch { } } } $null
     }
@@ -370,17 +372,17 @@ function Check-Presence {
             $f = $m.body -split '\|'
             if ($f.Count -lt 6 -or $f[0] -ne 'v1') { continue }
             $ver = 0; if ($f.Count -gt 6) { [void][int]::TryParse($f[6], [ref]$ver) }
-            $s = [pscustomobject]@{ dev = $f[2]; tv = ($f[3] -eq 'tv'); playing = ($f[4] -eq 'p'); model = $f[5]; at = $m.at; ver = $ver }
+            $s = [pscustomobject]@{ dev = $f[2]; tv = ($f[3] -eq 'tv'); playing = ($f[4] -eq 'p'); closed = ($f[4] -eq 'x'); model = $f[5]; at = $m.at; ver = $ver }
             if (-not $all.ContainsKey($f[1])) { $all[$f[1]] = New-Object System.Collections.ArrayList }
             [void]$all[$f[1]].Add($s)
-            if ($m.at -lt $now - 180) { continue }
+            if ($m.at -lt $now - $PresenceWindow) { continue }
             if (-not $fresh.ContainsKey($f[1])) { $fresh[$f[1]] = @{} }
             $p = $fresh[$f[1]][$s.dev]; if (-not $p -or $p.at -le $s.at) { $fresh[$f[1]][$s.dev] = $s }
         }
         $script:devices = @{}
         foreach ($u in $script:users) {
             $tag = Code-Tag (Normalize $u.pretty)
-            if ($fresh.ContainsKey($tag)) { $script:devices[$u.id] = @($fresh[$tag].Values | Sort-Object -Property at -Descending) }
+            if ($fresh.ContainsKey($tag)) { $open = @($fresh[$tag].Values | Where-Object { -not $_.closed } | Sort-Object -Property at -Descending); if ($open.Count) { $script:devices[$u.id] = $open } }   # S-159
             if ($all.ContainsKey($tag)) { Inst-Seen $u.id @($all[$tag]) }
         }
         Save-Inst
