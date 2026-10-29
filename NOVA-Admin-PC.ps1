@@ -15,6 +15,7 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-162 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 168"): invite + reminder explain the install pop-ups (install anyway), like Admin on the phone.
 # Updated S-160 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): reads / writes Roni's Cloudflare relay AND ntfy.sh (old NOVA versions), like Admin 240.
 # Updated S-159 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): presence window 25 minutes, "x" = NOVA closed (ntfy.sh 250 messages a day per home).
 # Updated S-158 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): message log + receipts (shown / closed), like Admin 236 on the phone.
@@ -22,7 +23,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 6
+$PcVersion = 7
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -466,6 +467,11 @@ function Msg-Counts($m) {
 function Last-Msg($u) { return (@($script:msgs) | Where-Object { $_.to -contains $u.id } | Select-Object -First 1) }
 
 # ── texts like the phone ─────────────────────────────────────────────────────
+# S-162: what to press on each install pop-up, word for word like the phone (AdminModel.kt INSTALL_POPUPS).
+$InstallPopups = "⚠️ קפצה הודעה בהתקנה? כך עוברים:`n" +
+    "• מבקש הרשאה ← הגדרות ← הפעל `"אפשר`" ← חזור`n" +
+    "• אזהרה / `"לא בטוח`" ← עוד פרטים ← התקן בכל זאת`n" +
+    "• `"לשלוח לסריקה?`" ← לא לשלוח`n`n"
 function Invite-Text($u) {
     $link = if ($script:cfg.link) { $script:cfg.link } else { $DefaultLink }
     $dl = $script:cfg.dlcode; $code = Normalize $u.pretty
@@ -477,6 +483,7 @@ function Invite-Text($u) {
         "📺 בטלוויזיה - התקן את Downloader:`n`n" +
         "https://play.google.com/store/apps/details?id=com.esaba.downloader`n`n" +
         "פתח אותו, הקלד $tvTyped ולחץ Go.`n`n" +
+        $InstallPopups +
         "🔑 הקוד שלך (בטלפון: העתק הדבק ): $code"
 }
 $SharedText = 'שים לב: הקוד שלך פתוח כרגע ביותר ממכשיר אחד. הקוד אישי ומיועד למכשיר אחד בלבד. אם זה לא אתה, פנה אלינו.'
