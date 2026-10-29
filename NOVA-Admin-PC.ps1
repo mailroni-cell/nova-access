@@ -15,6 +15,8 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-166 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 170"): "🗑 מחק" per message in the message log (also cancels it on screens that did not show it yet), like the phone.
+# Updated S-165 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 170"): "⬆ בדוק עדכון" button in the top bar (like Settings on the phone).
 # Updated S-164 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 170"): checks for a new version every 10 minutes while open (not only at start), restarts only when idle and no dialog is open; version shown in the title.
 # Updated S-162 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 168"): invite + reminder explain the install pop-ups (install anyway), like Admin on the phone.
 # Updated S-160 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): reads / writes Roni's Cloudflare relay AND ntfy.sh (old NOVA versions), like Admin 240.
@@ -24,7 +26,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 8
+$PcVersion = 10
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -570,6 +572,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
           <Button x:Name="BLog" Content="📜 יומן הודעות" Style="{StaticResource Ghost}"/>
           <Button x:Name="BCrash" Content="יומני קריסה" Style="{StaticResource Ghost}"/>
           <Button x:Name="BRefresh" Content="⟳ רענן" Style="{StaticResource Ghost}"/>
+          <Button x:Name="BUpdate" Content="⬆ בדוק עדכון" Style="{StaticResource Ghost}"/>
           <Button x:Name="BSettings" Content="⚙ הגדרות" Style="{StaticResource Ghost}"/>
         </StackPanel>
       </DockPanel>
@@ -956,11 +959,25 @@ function Show-MsgLog($uid) {
                 $st = Msg-State $g $id; [void]$p.Children.Add((T ("$(if ($names.ContainsKey($id)) { $names[$id] } else { 'משתמש שנמחק' }): $($st[1])") $st[0] 12 $false))
             }
         }
+        # S-166: delete from the shared log; screens that did not show it yet will not show it
+        $del = New-Object Windows.Controls.Button; $del.Content = '🗑 מחק'; $del.Style = $win.FindResource('Ghost'); $del.HorizontalAlignment = 'Left'; $del.Margin = (New-Object Windows.Thickness(0,6,0,0))
+        $del.Tag = @{ g = $g; d = $d }
+        $del.Add_Click({ param($s) $t = $s.Tag
+            if (Confirm 'מחיקת הודעה' "למחוק את ההודעה מהיומן?`nאם היא עוד לא הופיעה על המסך, היא גם לא תופיע.") { Delete-Msg $t.g; $t.d.reopen = $true; $t.d.win.Close() } })
+        [void]$p.Children.Add($del)
         [void]$box.Children.Add($b)
     }
     [void](Add-Text $d 'אישור מגיע רק מטלוויזיות עם NOVA מעודכנת. הודעות מלפני העדכון לא ביומן.' $null)
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
     [void]$d.win.ShowDialog()
+    if ($d.reopen) { Show-MsgLog $uid }   # S-166: after a delete
+}
+# S-166: removes a message from the shared log and clears it ("m" / "mi") from every entry that still carries it.
+function Delete-Msg($g) {
+    $id = [string]$g.id; $to = @($g.to)
+    Work { Change { param($L)
+        foreach ($x in @($L.users)) { if ($to -contains $x.id) { $o = Open-Entry $x; if ($o -and [string](Prop $o 'mi' '') -eq $id) { $x.d = Reseal $x @{ m = ''; mi = '' }; $x.mod = Now-Ms } } }
+        $L.msgs = @(@($L.msgs) | Where-Object { [string]$_.id -ne $id }) } } 'ההודעה נמחקה.'
 }
 function Show-Crashes {
     $d = New-Dialog 'יומני קריסה מהטלוויזיות'
@@ -1028,6 +1045,7 @@ $ui.BLog.Add_Click({ Show-MsgLog $null })   # S-158
 $ui.BMsgLog.Add_Click({ $u = Cur; if ($u) { Show-MsgLog $u.id } })
 $ui.BRefresh.Add_Click({ Load-All })
 $ui.BSettings.Add_Click({ Show-Settings })
+$ui.BUpdate.Add_Click({ Say 'בודק עדכון...'; Check-SelfUpdate $false $true })   # S-165
 $ui.BWhats.Add_Click({ $u = Cur; if ($u) { Send-Whats $u '' } })
 $ui.BMail.Add_Click({ $u = Cur; if ($u) { Send-Mail $u '' } })
 $ui.BCopy.Add_Click({ $u = Cur; if ($u) { [Windows.Clipboard]::SetText((Invite-Text $u)); Invited $u 'העתקה'; Say "ההודעה ל-$($u.name) הועתקה."; Show-Card } })
@@ -1140,12 +1158,12 @@ $minute.Add_Tick({
 $minute.Start()
 
 # ── updates itself from nova-access (version.json "adminPc") ─────────────────
-function Check-SelfUpdate([bool]$quiet = $false) {
+function Check-SelfUpdate([bool]$quiet = $false, [bool]$manual = $false) {
     Fetch ("https://raw.githubusercontent.com/$Repo/main/version.json?t=" + (Now-S)) {
         param($text)
-        if (-not $text) { return }
+        if (-not $text) { if ($manual) { Say 'אין חיבור לבדיקת עדכון. נסה שוב.' }; return }
         try { $a = ($text | ConvertFrom-Json).adminPc } catch { return }
-        if (-not $a -or [int]$a.version -le $PcVersion -or -not $a.url) { return }
+        if (-not $a -or [int]$a.version -le $PcVersion -or -not $a.url) { if ($manual) { Say "אין גרסה חדשה. יש לך גרסה $PcVersion." }; return }
         # S-164: from the timer, never in the middle of work: no open dialog, no sync, a minute without typing / clicking
         if ($quiet -and ($script:busy -or $win.OwnedWindows.Count -gt 0 -or ((Get-Date) - $script:lastInput).TotalSeconds -lt 60)) { return }
         try {
@@ -1158,7 +1176,7 @@ function Check-SelfUpdate([bool]$quiet = $false) {
             Say "עודכן לגרסה $($a.version). נפתח מחדש..."
             Start-Process powershell -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', "`"$me`"")
             $win.Close()
-        } catch { }
+        } catch { if ($manual) { Say 'העדכון נכשל. נסה שוב.' } }
     } $null
 }
 
