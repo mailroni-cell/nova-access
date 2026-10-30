@@ -15,6 +15,7 @@
 #       - updates itself: version.json "adminPc" in nova-access (NOVA-Admin-PC.ps1).
 #       Secrets: GitHub key and sync password stay DPAPI-encrypted on this PC (access\github.key, access\sync.key).
 #       Server passwords live only inside the sealed entries and are opened in memory only; never logged.
+# Updated S-167 2026-10-30 (Claude Opus 5.5, thread "קרא handoff 172"): "🗑 מחק הכול" in the message log, like the phone.
 # Updated S-166 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 170"): "🗑 מחק" per message in the message log (also cancels it on screens that did not show it yet), like the phone.
 # Updated S-165 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 170"): "⬆ בדוק עדכון" button in the top bar (like Settings on the phone).
 # Updated S-164 2026-10-29 (Claude Opus 5.5, thread "קרא handoff 170"): checks for a new version every 10 minutes while open (not only at start), restarts only when idle and no dialog is open; version shown in the title.
@@ -26,7 +27,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 10
+$PcVersion = 11
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -968,16 +969,25 @@ function Show-MsgLog($uid) {
         [void]$box.Children.Add($b)
     }
     [void](Add-Text $d 'אישור מגיע רק מטלוויזיות עם NOVA מעודכנת. הודעות מלפני העדכון לא ביומן.' $null)
+    if ($list.Count) {   # S-167: delete every message shown here
+        $d.all = $list
+        [void](Add-Btn $d "🗑 מחק הכול ($($list.Count))" $false { param($x)
+            if (Confirm 'מחיקת כל ההודעות' "למחוק $(@($x.all).Count) הודעות מהיומן?`nהודעות שעוד לא הופיעו על המסך גם לא יופיעו.") { Delete-Msgs $x.all; Close-Dlg $x $null } } $Red)
+    }
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
     [void]$d.win.ShowDialog()
     if ($d.reopen) { Show-MsgLog $uid }   # S-166: after a delete
 }
 # S-166: removes a message from the shared log and clears it ("m" / "mi") from every entry that still carries it.
-function Delete-Msg($g) {
-    $id = [string]$g.id; $to = @($g.to)
+function Delete-Msg($g) { Delete-Msgs @($g) }
+# S-167: the same for a list ("מחק הכול")
+function Delete-Msgs($gs) {
+    $ids = @(@($gs) | ForEach-Object { [string]$_.id }); $to = @(@($gs) | ForEach-Object { @($_.to) } | Select-Object -Unique)
+    if (-not $ids.Count) { return }
+    $ok = $(if ($ids.Count -eq 1) { 'ההודעה נמחקה.' } else { "$($ids.Count) הודעות נמחקו." })
     Work { Change { param($L)
-        foreach ($x in @($L.users)) { if ($to -contains $x.id) { $o = Open-Entry $x; if ($o -and [string](Prop $o 'mi' '') -eq $id) { $x.d = Reseal $x @{ m = ''; mi = '' }; $x.mod = Now-Ms } } }
-        $L.msgs = @(@($L.msgs) | Where-Object { [string]$_.id -ne $id }) } } 'ההודעה נמחקה.'
+        foreach ($x in @($L.users)) { if ($to -contains $x.id) { $o = Open-Entry $x; if ($o -and $ids -contains [string](Prop $o 'mi' '')) { $x.d = Reseal $x @{ m = ''; mi = '' }; $x.mod = Now-Ms } } }
+        $L.msgs = @(@($L.msgs) | Where-Object { $ids -notcontains [string]$_.id }) } } $ok
 }
 function Show-Crashes {
     $d = New-Dialog 'יומני קריסה מהטלוויזיות'
