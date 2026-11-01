@@ -1,6 +1,7 @@
 ﻿﻿# ─────────────────────────────────────────────────────────────────────────────
 # SUPER NOVA Admin (PC) · S-154 · 2026-10-29
 # Signed: Claude Opus 5.5 · project "SUPER NOVA" · thread "קרא MD והמשך"
+# Updated S-179 2026-11-01 (Claude Opus 5.5, thread "מסך הבית רחב"): "מצב קל" next to a device that runs NOVA in weak device mode; PcVersion 12.
 # What: Roni: the PC admin window always has everything the phone NOVA-Admin app has (CLAUDE.md rule S-154).
 #       Rewritten from S-018..S-098 to the phone's model (admin/AdminModel.kt, AdminData.kt, NovaCrypto.kt,
 #       NovaRemote.kt, InstallLog.kt, CrashWatch.kt):
@@ -27,7 +28,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 11
+$PcVersion = 12   # S-179
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -393,7 +394,7 @@ function Check-Presence {
             $f = $m.body -split '\|'
             if ($f.Count -lt 6 -or $f[0] -ne 'v1') { continue }
             $ver = 0; if ($f.Count -gt 6) { [void][int]::TryParse($f[6], [ref]$ver) }
-            $s = [pscustomobject]@{ dev = $f[2]; tv = ($f[3] -eq 'tv'); playing = ($f[4] -eq 'p'); closed = ($f[4] -eq 'x'); model = $f[5]; at = $m.at; ver = $ver }
+            $s = [pscustomobject]@{ dev = $f[2]; tv = ($f[3] -eq 'tv'); playing = ($f[4] -eq 'p'); closed = ($f[4] -eq 'x'); model = $f[5]; at = $m.at; ver = $ver; lite = ($f.Count -gt 7 -and $f[7] -eq 'L') }   # S-179
             if (-not $all.ContainsKey($f[1])) { $all[$f[1]] = New-Object System.Collections.ArrayList }
             [void]$all[$f[1]].Add($s)
             if ($m.at -lt $now - $PresenceWindow) { continue }
@@ -512,7 +513,7 @@ function Install-Tag($u) {
 }
 function Shared-Note($u) {
     $d = @($script:devices[$u.id] | Where-Object { $_ }); if ($d.Count -lt 2) { return $null }
-    return "⚠ פתוח עכשיו ב-$($d.Count) מכשירים: " + (($d | ForEach-Object { $(if ($_.tv) { '📺 ' } else { '📱 ' }) + $(if ($_.model) { $_.model } else { 'מכשיר' }) + $(if ($_.playing) { ' (צופה)' } else { '' }) }) -join ' · ')
+    return "⚠ פתוח עכשיו ב-$($d.Count) מכשירים: " + (($d | ForEach-Object { $(if ($_.tv) { '📺 ' } else { '📱 ' }) + $(if ($_.model) { $_.model } else { 'מכשיר' }) + $(if ($_.playing) { ' (צופה)' } else { '' }) + $(if ($_.lite) { ' (מצב קל)' } else { '' }) }) -join ' · ')   # S-179
 }
 function Local-Digits($s) { $d = $s -replace '\D', ''; if ($d.StartsWith('972')) { $d = '0' + $d.Substring(3) }; return $d }
 function Matches($u, $q) {
@@ -810,7 +811,7 @@ function Show-Card {
     $info = @(); if ($u.phone) { $info += "טלפון: $($u.phone)" }; if ($u.mail) { $info += "מייל: $($u.mail)" }
     if (-not $adm) { $info += $(if ($u.x -gt 0) { "תוקף החשבון: עד $(Day $u.x)" } else { 'תוקף החשבון: ללא הגבלה' }) }
     $devs = @($script:devices[$u.id] | Where-Object { $_ })
-    if ($devs.Count -eq 1) { $info += "פתוח עכשיו ב: $($devs[0].model)$(if ($devs[0].playing) { ' · צופה' } else { '' })" }
+    if ($devs.Count -eq 1) { $info += "פתוח עכשיו ב: $($devs[0].model)$(if ($devs[0].playing) { ' · צופה' } else { '' })$(if ($devs[0].lite) { ' · מצב קל' } else { '' })" }   # S-179
     $ui.CInfo.Text = ($info -join ' · ')
     $sn = Shared-Note $u
     $ui.CShared.Text = $sn; $ui.CShared.Visibility = $(if ($sn) { 'Visible' } else { 'Collapsed' }); $ui.BShared.Visibility = $ui.CShared.Visibility
