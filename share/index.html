@@ -114,7 +114,7 @@ main{flex:1 1 0;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:calc
 #stepscard .stepbtn{background:linear-gradient(180deg,#7ab0ff 0%,#3f7dff 48%,#1e55d6 52%,#2f6cf0 100%);cursor:pointer;animation:nudge 2.6s ease-in-out 1.2s 2}
 .hand{position:absolute;left:50%;top:50%;width:calc(var(--u)*15);height:auto;z-index:5;pointer-events:none;transform:translate(-39%,-6%);filter:drop-shadow(0 calc(var(--u)*.7) calc(var(--u)*.9) rgba(0,0,40,.55));animation:tap 1.9s ease-in-out infinite}
 .ripple{position:absolute;left:50%;top:50%;width:calc(var(--u)*7);height:calc(var(--u)*7);margin:calc(var(--u)*-3.5) 0 0 calc(var(--u)*-3.5);border-radius:50%;border:calc(var(--u)*.35) solid #fff;opacity:0;z-index:4;pointer-events:none;animation:rip 1.9s ease-out infinite}
-@keyframes tap{0%{opacity:0;transform:translate(-39%,calc(var(--u)*4)) scale(1)}22%{opacity:1;transform:translate(-39%,calc(var(--u)*2)) scale(1)}40%,54%{opacity:1;transform:translate(-39%,-6%) scale(.95)}78%{opacity:1;transform:translate(-39%,calc(var(--u)*2)) scale(1)}100%{opacity:0;transform:translate(-39%,calc(var(--u)*4)) scale(1)}}
+@keyframes tap{0%,100%{opacity:1;transform:translate(-39%,calc(var(--u)*2.2)) scale(1)}40%,54%{opacity:1;transform:translate(-39%,-6%) scale(.95)}}
 @keyframes rip{0%,34%{opacity:0;transform:scale(.2)}42%{opacity:.95;transform:scale(.7)}100%{opacity:0;transform:scale(1.9)}}
 @media (prefers-reduced-motion:reduce){.hand,.ripple{animation:none}}
 #stepscard .step svg.hand{height:auto;width:calc(var(--u)*15);aspect-ratio:auto;background:none;border-radius:0;flex:none}
