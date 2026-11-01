@@ -1,5 +1,5 @@
 ﻿<#
-NOVA-Share SERVICE (PC) · S-187 round A · 2026-11-01
+NOVA-Share SERVICE (PC) · S-187 round A · 2026-11-01 · updated S-191 round C (encryption) 2026-11-01
 Signed: Claude Sonnet 5.5 · project "SUPER NOVA" · thread "המשך" (milestone 5, step 5.8)
 
 What (Roni approved 2026-11-01, "אשר"; no guest sharing):
@@ -13,15 +13,19 @@ What (Roni approved 2026-11-01, "אשר"; no guest sharing):
              Commands: hello, pair, status, drives, dirs, share-add, share-temp, share-remove, share-pause, share-resume,
              remove-all, health, health-fix, unpair, uninstall. Everything except hello/pair needs the token the TV got when it paired.
   * Uninstall : removes the shares, the user, the firewall rules, the scheduled task and C:\ProgramData\NOVA-Share (no trace is left).
-  Shares are READ ONLY. Temporary shares close by themselves. Traffic is plain JSON on the home network for now
-  (encryption with the pairing code as a shared key is round C).
+  Shares are READ ONLY. Temporary shares close by themselves.
+  Round C (S-191, protocol v2): after pairing, every request and answer is AES-256-GCM encrypted with a key made from the pairing
+  token (the token itself is never sent again). Only hello / pair are plain. An old TV that does not know v2 keeps working in plain
+  text until the first time a TV used v2 with that token; from then on that token is refused in plain text ("enc-required").
+  The encryption switches itself on only after a self test (known-answer vectors) passes; otherwise hello says enc=0 and all
+  stays as before. Setup keeps the existing pairings and the existing "nova" password, so an update does not break a working TV.
 Targets Windows PowerShell 5.1 (powershell.exe). Event log (no secrets): C:\ProgramData\NOVA-Share\events.log
 #>
 [CmdletBinding()]
 param([ValidateSet('Setup', 'Run', 'Uninstall', 'SelfTest')][string]$Action = 'Setup')
 $ErrorActionPreference = 'Stop'
 
-$script:Version = '1.0.0-s187a'
+$script:Version = '1.1.0-s191'
 $script:TaskName = 'NOVA-Share'
 $script:UserName = 'nova'
 $script:UdpPort = 47800
@@ -37,6 +41,10 @@ $script:Fails = @{}
 $script:AclJobs = @{}
 $script:Cfg = $null
 $script:CodeExpires = [int64]0
+$script:EncOk = $null                 # round C: $null = not tested yet, $true / $false after the self test
+$script:SeenNonces = @{}              # round C: request nonces seen lately (replay protection)
+$script:ReqAad = [System.Text.Encoding]::UTF8.GetBytes('nova-req-v2')
+$script:ResAadPrefix = [System.Text.Encoding]::UTF8.GetBytes('nova-res-v2')
 $script:BlockedNames = @('AppData', '$Recycle.Bin', 'System Volume Information', 'Recovery', 'Windows.old', '$WinREAgent', 'Config.Msi')
 
 # ── small helpers ───────────────────────────────────────────────────────────
@@ -431,15 +439,216 @@ function Invoke-HealthFix {
     } catch { Write-Event ('fix network: ' + $_.Exception.Message) }
 }
 
+# ── encryption, protocol v2 (round C) ───────────────────────────────────────
+# AES-256-GCM through the Windows CNG (bcrypt.dll); Windows PowerShell 5.1 has no managed AES-GCM.
+$script:GcmSource = @'
+using System;
+using System.Runtime.InteropServices;
+public static class NovaGcm {
+    [StructLayout(LayoutKind.Sequential)]
+    struct AuthInfo {
+        public int cbSize; public int dwInfoVersion;
+        public IntPtr pbNonce; public int cbNonce;
+        public IntPtr pbAuthData; public int cbAuthData;
+        public IntPtr pbTag; public int cbTag;
+        public IntPtr pbMacContext; public int cbMacContext;
+        public int cbAAD; public long cbData; public int dwFlags;
+    }
+    [DllImport("bcrypt.dll")] static extern uint BCryptOpenAlgorithmProvider(out IntPtr phAlg, [MarshalAs(UnmanagedType.LPWStr)] string alg, [MarshalAs(UnmanagedType.LPWStr)] string impl, uint flags);
+    [DllImport("bcrypt.dll")] static extern uint BCryptCloseAlgorithmProvider(IntPtr hAlg, uint flags);
+    [DllImport("bcrypt.dll")] static extern uint BCryptSetProperty(IntPtr hObj, [MarshalAs(UnmanagedType.LPWStr)] string prop, byte[] input, int cb, uint flags);
+    [DllImport("bcrypt.dll")] static extern uint BCryptGenerateSymmetricKey(IntPtr hAlg, out IntPtr hKey, IntPtr obj, int cbObj, byte[] secret, int cbSecret, uint flags);
+    [DllImport("bcrypt.dll")] static extern uint BCryptDestroyKey(IntPtr hKey);
+    [DllImport("bcrypt.dll")] static extern uint BCryptEncrypt(IntPtr hKey, byte[] input, int cbInput, ref AuthInfo info, byte[] iv, int cbIv, byte[] output, int cbOutput, out int cbResult, uint flags);
+    [DllImport("bcrypt.dll")] static extern uint BCryptDecrypt(IntPtr hKey, byte[] input, int cbInput, ref AuthInfo info, byte[] iv, int cbIv, byte[] output, int cbOutput, out int cbResult, uint flags);
+
+    static void OpenAlg(byte[] key, out IntPtr alg, out IntPtr hKey) {
+        alg = IntPtr.Zero; hKey = IntPtr.Zero;
+        uint st = BCryptOpenAlgorithmProvider(out alg, "AES", null, 0);
+        if (st != 0) throw new InvalidOperationException("BCryptOpenAlgorithmProvider 0x" + st.ToString("x"));
+        byte[] mode = System.Text.Encoding.Unicode.GetBytes("ChainingModeGCM\0");
+        st = BCryptSetProperty(alg, "ChainingMode", mode, mode.Length, 0);
+        if (st != 0) { BCryptCloseAlgorithmProvider(alg, 0); throw new InvalidOperationException("BCryptSetProperty 0x" + st.ToString("x")); }
+        st = BCryptGenerateSymmetricKey(alg, out hKey, IntPtr.Zero, 0, key, key.Length, 0);
+        if (st != 0) { BCryptCloseAlgorithmProvider(alg, 0); throw new InvalidOperationException("BCryptGenerateSymmetricKey 0x" + st.ToString("x")); }
+    }
+
+    // cipher text followed by the 16-byte tag
+    public static byte[] Seal(byte[] key, byte[] nonce, byte[] plain, byte[] aad) {
+        IntPtr alg, hKey;
+        OpenAlg(key, out alg, out hKey);
+        byte[] tag = new byte[16];
+        GCHandle hN = GCHandle.Alloc(nonce, GCHandleType.Pinned);
+        GCHandle hA = GCHandle.Alloc(aad, GCHandleType.Pinned);
+        GCHandle hT = GCHandle.Alloc(tag, GCHandleType.Pinned);
+        try {
+            AuthInfo info = new AuthInfo();
+            info.cbSize = Marshal.SizeOf(typeof(AuthInfo)); info.dwInfoVersion = 1;
+            info.pbNonce = hN.AddrOfPinnedObject(); info.cbNonce = nonce.Length;
+            info.pbAuthData = hA.AddrOfPinnedObject(); info.cbAuthData = aad.Length;
+            info.pbTag = hT.AddrOfPinnedObject(); info.cbTag = 16;
+            byte[] ct = new byte[plain.Length];
+            int n;
+            uint st = BCryptEncrypt(hKey, plain, plain.Length, ref info, null, 0, ct, ct.Length, out n, 0);
+            if (st != 0) throw new InvalidOperationException("BCryptEncrypt 0x" + st.ToString("x"));
+            byte[] r = new byte[ct.Length + 16];
+            Buffer.BlockCopy(ct, 0, r, 0, ct.Length);
+            Buffer.BlockCopy(tag, 0, r, ct.Length, 16);
+            return r;
+        } finally { hN.Free(); hA.Free(); hT.Free(); BCryptDestroyKey(hKey); BCryptCloseAlgorithmProvider(alg, 0); }
+    }
+
+    // the plain text, or null when the tag does not match
+    public static byte[] Open(byte[] key, byte[] nonce, byte[] cipherAndTag, byte[] aad) {
+        if (cipherAndTag.Length < 16) return null;
+        IntPtr alg, hKey;
+        OpenAlg(key, out alg, out hKey);
+        int len = cipherAndTag.Length - 16;
+        byte[] ct = new byte[len];
+        byte[] tag = new byte[16];
+        Buffer.BlockCopy(cipherAndTag, 0, ct, 0, len);
+        Buffer.BlockCopy(cipherAndTag, len, tag, 0, 16);
+        GCHandle hN = GCHandle.Alloc(nonce, GCHandleType.Pinned);
+        GCHandle hA = GCHandle.Alloc(aad, GCHandleType.Pinned);
+        GCHandle hT = GCHandle.Alloc(tag, GCHandleType.Pinned);
+        try {
+            AuthInfo info = new AuthInfo();
+            info.cbSize = Marshal.SizeOf(typeof(AuthInfo)); info.dwInfoVersion = 1;
+            info.pbNonce = hN.AddrOfPinnedObject(); info.cbNonce = nonce.Length;
+            info.pbAuthData = hA.AddrOfPinnedObject(); info.cbAuthData = aad.Length;
+            info.pbTag = hT.AddrOfPinnedObject(); info.cbTag = 16;
+            byte[] plain = new byte[len];
+            int n;
+            uint st = BCryptDecrypt(hKey, ct, len, ref info, null, 0, plain, len, out n, 0);
+            if (st == 0xC000A002) return null;
+            if (st != 0) throw new InvalidOperationException("BCryptDecrypt 0x" + st.ToString("x"));
+            return plain;
+        } finally { hN.Free(); hA.Free(); hT.Free(); BCryptDestroyKey(hKey); BCryptCloseAlgorithmProvider(alg, 0); }
+    }
+}
+'@
+
+function ConvertTo-HexString([byte[]]$b) { return ([BitConverter]::ToString($b)).Replace('-', '').ToLowerInvariant() }
+function ConvertFrom-HexString([string]$h) {
+    $b = New-Object byte[] ([int]($h.Length / 2))
+    for ($i = 0; $i -lt $b.Length; $i++) { $b[$i] = [Convert]::ToByte($h.Substring(2 * $i, 2), 16) }
+    return , $b
+}
+
+# the AES key of one pairing: HMAC-SHA256(key = the stored token hash, message = "nova-share-v2 key"); the TV computes the same from the token
+function Get-EncKey([string]$hashHex) {
+    $m = [System.Security.Cryptography.HMACSHA256]::new([byte[]](ConvertFrom-HexString $hashHex.ToLowerInvariant()))
+    try { return , ($m.ComputeHash([System.Text.Encoding]::UTF8.GetBytes('nova-share-v2 key'))) } finally { $m.Dispose() }
+}
+
+# true only when the CNG code compiled AND reproduced two known answers (NIST GCM test case 16, and a request made by the TV code)
+function Test-GcmReady {
+    if ($null -ne $script:EncOk) { return [bool]$script:EncOk }
+    $script:EncOk = $false
+    try {
+        if (-not ('NovaGcm' -as [type])) { Add-Type -TypeDefinition $script:GcmSource -Language CSharp }
+        $k = [byte[]](ConvertFrom-HexString 'feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308')
+        $iv = [byte[]](ConvertFrom-HexString 'cafebabefacedbaddecaf888')
+        $p = [byte[]](ConvertFrom-HexString 'd9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39')
+        $a = [byte[]](ConvertFrom-HexString 'feedfacedeadbeeffeedfacedeadbeefabaddad2')
+        $want = '522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b'
+        $ct = [NovaGcm]::Seal($k, $iv, $p, $a)
+        if ((ConvertTo-HexString $ct) -ne $want) { throw 'known answer 1 (seal) differs' }
+        $back = [NovaGcm]::Open($k, $iv, $ct, $a)
+        if (($null -eq $back) -or ((ConvertTo-HexString $back) -ne (ConvertTo-HexString $p))) { throw 'known answer 1 (open) differs' }
+        $bad = [byte[]]$ct.Clone(); $bad[3] = $bad[3] -bxor 1
+        if ($null -ne [NovaGcm]::Open($k, $iv, $bad, $a)) { throw 'a damaged message was accepted' }
+        $key = [byte[]](Get-EncKey (Get-Sha256Hex ('0123456789abcdef' * 4)))
+        $n2 = [Convert]::FromBase64String('AQIDBAUGBwgJCgsM')
+        $c2 = [Convert]::FromBase64String('jPp97vuBHA2rTS9/PeCLs62Wl192hlPt2W21xgq0xiAUesT3WPM4YeiYOlkc4zQ=')
+        $o2 = [NovaGcm]::Open($key, $n2, $c2, $script:ReqAad)
+        if (($null -eq $o2) -or ([System.Text.Encoding]::UTF8.GetString($o2) -ne '{"cmd":"status","t":1700000000}')) { throw 'known answer 2 (TV request) differs' }
+        $script:EncOk = $true
+    } catch { Write-Event ('encryption not available: ' + $_.Exception.Message) }
+    return [bool]$script:EncOk
+}
+
+function Test-RecEnc($rec) {
+    $pr = $rec.PSObject.Properties['enc']
+    return (($null -ne $pr) -and ($pr.Value -eq $true))
+}
+function Set-RecEnc($rec) {
+    if ($rec.PSObject.Properties['enc']) { $rec.enc = $true } else { Add-Member -InputObject $rec -NotePropertyName 'enc' -NotePropertyValue $true }
+    Save-Config $script:Cfg
+}
+
+# a request must be fresh (clock within 10 minutes) and never seen before (nonce kept 22 minutes): no replay
+function Test-FreshRequest([string]$nonceText, [int64]$t) {
+    $now = Get-Now
+    foreach ($k in @($script:SeenNonces.Keys)) { if ([int64]$script:SeenNonces[$k] -lt ($now - 1300)) { $script:SeenNonces.Remove($k) } }
+    if ([math]::Abs($now - $t) -gt 600) { return 'time' }
+    if ($script:SeenNonces.ContainsKey($nonceText)) { return 'replay' }
+    if ($script:SeenNonces.Count -gt 5000) { return 'busy' }
+    $script:SeenNonces[$nonceText] = $now
+    return 'ok'
+}
+
+# envelope {"v":2,"n":...,"c":...} -> @{ rec; req; key; nonce }, or $null when no pairing's key opens it
+function Open-RequestEnvelope($env) {
+    try {
+        $n = [Convert]::FromBase64String([string]$env.n)
+        $c = [Convert]::FromBase64String([string]$env.c)
+    } catch { return $null }
+    if (($n.Length -ne 12) -or ($c.Length -lt 17) -or ($c.Length -gt 6000)) { return $null }
+    foreach ($t in @($script:Cfg.tokens)) {
+        $h = ([string]$t.hash).ToLowerInvariant()
+        if ($h -notmatch '^[0-9a-f]{64}$') { continue }
+        $key = [byte[]](Get-EncKey $h)
+        $plain = [NovaGcm]::Open($key, $n, $c, $script:ReqAad)
+        if ($null -ne $plain) {
+            $req = $null
+            try { $req = ConvertFrom-Json -InputObject ([System.Text.Encoding]::UTF8.GetString($plain)) } catch { }
+            if (-not $req) { return $null }
+            return @{ rec = $t; req = $req; key = $key; nonce = $n; nonceText = [string]$env.n }
+        }
+    }
+    return $null
+}
+
+# the whole encrypted exchange: @{ resp = <answer>; key = <key or $null for a plain answer>; nonce = <request nonce> }
+function Invoke-EncryptedRequest($env, [string]$ip) {
+    if (-not (Test-GcmReady)) { return @{ resp = @{ ok = $false; error = 'no-enc' }; key = $null; nonce = $null } }
+    $ctx = Open-RequestEnvelope $env
+    if (-not $ctx) { Add-IpFail $ip; return @{ resp = @{ ok = $false; error = 'auth' }; key = $null; nonce = $null } }
+    $inner = $ctx.req
+    $t = [int64]0
+    try { $t = [int64]$inner.t } catch { }
+    $fresh = Test-FreshRequest $ctx.nonceText $t
+    if ($fresh -eq 'time') { return @{ resp = @{ ok = $false; error = 'time'; now = (Get-Now) }; key = $ctx.key; nonce = $ctx.nonce } }
+    if ($fresh -ne 'ok') { Add-IpFail $ip; return @{ resp = @{ ok = $false; error = $fresh }; key = $ctx.key; nonce = $ctx.nonce } }
+    if (-not (Test-RecEnc $ctx.rec)) { Set-RecEnc $ctx.rec; Write-Event ("TV '" + [string]$ctx.rec.tv + "' now uses encryption") }
+    $resp = $null
+    try { $resp = Invoke-NovaCommand $inner $ip $ctx.rec }
+    catch { Write-Event ('command error ' + [string]$inner.cmd + ': ' + $_.Exception.Message); $resp = @{ ok = $false; error = 'internal' } }
+    if ($resp -is [array]) { $resp = $resp[$resp.Count - 1] }
+    return @{ resp = $resp; key = $ctx.key; nonce = $ctx.nonce }
+}
+
+# the answer as one encrypted line, bound to the request it answers
+function New-EncryptedLine([byte[]]$key, [byte[]]$reqNonce, $resp) {
+    $plain = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $resp -Depth 6 -Compress))
+    $aad = [byte[]]($script:ResAadPrefix + $reqNonce)
+    $nonce = [byte[]](Get-RandomBytes 12)
+    $ct = [NovaGcm]::Seal($key, $nonce, $plain, $aad)
+    return (ConvertTo-Json -InputObject @{ v = 2; n = [Convert]::ToBase64String($nonce); c = [Convert]::ToBase64String($ct) } -Compress)
+}
+
 # ── the commands the TV can send ────────────────────────────────────────────
-function Invoke-NovaCommand($req, [string]$ip) {
+function Invoke-NovaCommand($req, [string]$ip, $encRec = $null) {
     $cmd = [string]$req.cmd
 
     if ($cmd -eq 'hello') {
         $pairing = $false
         $pj = Read-JsonFile $script:PairPath
         if ($pj -and ([int64]$pj.expires -gt (Get-Now))) { $pairing = $true }
-        return @{ ok = $true; computer = [string]$env:COMPUTERNAME; version = $script:Version; paired = (@($script:Cfg.tokens).Count -gt 0); pairing = $pairing }
+        $encFlag = 0
+        if (Test-GcmReady) { $encFlag = 1 }
+        return @{ ok = $true; computer = [string]$env:COMPUTERNAME; version = $script:Version; paired = (@($script:Cfg.tokens).Count -gt 0); pairing = $pairing; enc = $encFlag }
     }
 
     if ($cmd -eq 'pair') {
@@ -458,14 +667,19 @@ function Invoke-NovaCommand($req, [string]$ip) {
         return @{ ok = $true; token = $token; computer = [string]$env:COMPUTERNAME; host = (Get-LanAddress); user = $script:UserName; password = (Unprotect-Text ([string]$script:Cfg.userSecret)) }
     }
 
-    # everything else needs a token
-    $token = [string]$req.token
+    # everything else needs a token (or, in v2, the key of a pairing: $encRec is the pairing whose key opened the request)
     $tr = $null
-    if ($token.Length -ge 32) {
-        $h = Get-Sha256Hex $token
-        foreach ($t in @($script:Cfg.tokens)) { if (Test-SameText ([string]$t.hash) $h) { $tr = $t } }
+    if ($encRec) { $tr = $encRec }
+    else {
+        $token = [string]$req.token
+        if ($token.Length -ge 32) {
+            $h = Get-Sha256Hex $token
+            foreach ($t in @($script:Cfg.tokens)) { if (Test-SameText ([string]$t.hash) $h) { $tr = $t } }
+        }
+        if (-not $tr) { Add-IpFail $ip; return @{ ok = $false; error = 'auth' } }
+        # this pairing already used encryption: its token is never accepted in plain text again (no downgrade)
+        if (Test-RecEnc $tr) { Write-Event ('plain request refused (enc-required) from ' + $ip); return @{ ok = $false; error = 'enc-required' } }
     }
-    if (-not $tr) { Add-IpFail $ip; return @{ ok = $false; error = 'auth' } }
 
     switch ($cmd) {
         'status' {
@@ -598,12 +812,18 @@ function Invoke-ClientRequest($client) {
         $stream = $client.GetStream()
         $line = Read-RequestLine $stream
         $resp = $null
+        $encKey = $null
+        $encNonce = $null
         if ($line.StartsWith('NOVA-PAIR ')) {
             $resp = @{ ok = $false; error = 'use-new-wizard' }   # the old NOVA 272 pairing needs a window on the PC; the service uses a code instead
         } else {
             $req = $null
             try { $req = ConvertFrom-Json -InputObject $line } catch { }
-            if ((-not $req) -or (-not $req.cmd)) { Add-IpFail $ip; $resp = @{ ok = $false; error = 'bad-request' } }
+            if ($req -and ([string]$req.v -eq '2') -and $req.n -and $req.c) {
+                $r2 = Invoke-EncryptedRequest $req $ip
+                $resp = $r2.resp; $encKey = $r2.key; $encNonce = $r2.nonce
+            }
+            elseif ((-not $req) -or (-not $req.cmd)) { Add-IpFail $ip; $resp = @{ ok = $false; error = 'bad-request' } }
             else {
                 try { $resp = Invoke-NovaCommand $req $ip }
                 catch { Write-Event ('command error ' + [string]$req.cmd + ': ' + $_.Exception.Message); $resp = @{ ok = $false; error = 'internal' } }
@@ -612,7 +832,9 @@ function Invoke-ClientRequest($client) {
         if ($resp -is [array]) { $resp = $resp[$resp.Count - 1] }
         $after = ''
         if ($resp.ContainsKey('after')) { $after = [string]$resp['after']; $resp.Remove('after') }
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $resp -Depth 6 -Compress) + "`n")
+        $text = ''
+        if ($encKey) { $text = New-EncryptedLine ([byte[]]$encKey) ([byte[]]$encNonce) $resp } else { $text = ConvertTo-Json -InputObject $resp -Depth 6 -Compress }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($text + "`n")
         $stream.Write($bytes, 0, $bytes.Length)
         $stream.Flush()
         if ($after -eq 'uninstall') { try { $client.Close() } catch { }; Invoke-Uninstall $false }
@@ -647,6 +869,7 @@ function Start-ServiceLoop {
     $script:Cfg = Get-Config
     if (-not $script:Cfg.userSid) { Write-Event 'not installed (no user) - exiting'; return }
     Write-Event ('service start v' + $script:Version)
+    if (Test-GcmReady) { Write-Event 'encryption (AES-GCM) ready' } else { Write-Event 'encryption NOT available - plain text only (see the line above)' }
     try { Invoke-Reconcile } catch { Write-Event ('reconcile: ' + $_.Exception.Message) }
     $udp = New-Object System.Net.Sockets.UdpClient
     $udp.Client.SetSocketOption([System.Net.Sockets.SocketOptionLevel]::Socket, [System.Net.Sockets.SocketOptionName]::ReuseAddress, $true)
@@ -721,9 +944,12 @@ function Install-NovaService {
     Set-Service -Name LanmanServer -StartupType Automatic
     if ((Get-Service -Name LanmanServer).Status -ne 'Running') { Start-Service -Name LanmanServer }
 
-    $pw = New-NovaPassword
-    $sec = ConvertTo-SecureString $pw -AsPlainText -Force
     $u = Get-LocalUser -Name $script:UserName -ErrorAction SilentlyContinue
+    # an update keeps the same password (the TVs already hold it); a new one is made only on a fresh install
+    $pw = ''
+    if ($u) { try { $oldCfg = Get-Config; if ($oldCfg.userSecret) { $pw = Unprotect-Text ([string]$oldCfg.userSecret) } } catch { $pw = '' } }
+    if (-not $pw) { $pw = New-NovaPassword }
+    $sec = ConvertTo-SecureString $pw -AsPlainText -Force
     if ($u) {
         Set-LocalUser -Name $script:UserName -Password $sec -PasswordNeverExpires $true -UserMayChangePassword $false
         Enable-LocalUser -Name $script:UserName
@@ -881,6 +1107,14 @@ function Invoke-Setup {
         } catch { [void][System.Windows.Forms.MessageBox]::Show('כדי להתקין צריך לאשר את חלון ההרשאות של Windows (כן). נסה שוב.', 'NOVA-Share') }
         return
     }
+    # before anything on the PC changes, this new script tests itself (including the encryption known answers)
+    try {
+        $pf = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath), '-Action', 'SelfTest') -WindowStyle Hidden -Wait -PassThru
+        if ($pf.ExitCode -ne 0) {
+            $go = [System.Windows.Forms.MessageBox]::Show("הבדיקה העצמית של הגרסה החדשה נכשלה, והשירות הקיים לא שונה.`r`nלהמשיך בכל זאת?", 'NOVA-Share', 'YesNo', 'Warning')
+            if ($go -ne 'Yes') { return }
+        }
+    } catch { }
     try {
         $alive = Install-NovaService
         Show-SetupForm $alive
@@ -981,6 +1215,40 @@ function Invoke-SelfTest {
     Check 'short token refused' $a2.error 'auth'
     for ($i = 0; $i -lt 10; $i++) { Add-IpFail '192.168.1.77' }
     Check 'ip blocked after 10 failures' (Test-IpBlocked '192.168.1.77') $true
+
+    # round C: encryption (the vectors come from an independent implementation; the TV's Kotlin code does the same maths)
+    Check 'encryption self test passes' (Test-GcmReady) $true
+    $encTok = '0123456789abcdef' * 4
+    $encRec = [pscustomobject]@{ id = 'e1'; hash = (Get-Sha256Hex $encTok); tv = 'EncTV'; created = 1 }
+    $script:Cfg.tokens = @($script:Cfg.tokens) + $encRec
+    Check 'key from token' (ConvertTo-HexString ([byte[]](Get-EncKey (Get-Sha256Hex $encTok)))) 'c572b2e811008722ca1971822daabbfff5df852e9101bf3b07f403cfa6af9533'
+    $vEnv = [pscustomobject]@{ v = 2; n = 'AQIDBAUGBwgJCgsM'; c = 'jPp97vuBHA2rTS9/PeCLs62Wl192hlPt2W21xgq0xiAUesT3WPM4YeiYOlkc4zQ=' }
+    $ctx = Open-RequestEnvelope $vEnv
+    Check 'TV request opens' ($null -ne $ctx) $true
+    Check 'TV request belongs to its pairing' ([string]$ctx.rec.id) 'e1'
+    Check 'TV request text' ([string]$ctx.req.cmd) 'status'
+    $vBad = [pscustomobject]@{ v = 2; n = 'AQIDBAUGBwgJCgsM'; c = 'kPp97vuBHA2rTS9/PeCLs62Wl192hlPt2W21xgq0xiAUesT3WPM4YeiYOlkc4zQ=' }
+    Check 'damaged request refused' ($null -eq (Open-RequestEnvelope $vBad)) $true
+    Check 'old request time refused' (Test-FreshRequest 'n-old' 1700000000) 'time'
+    Check 'fresh request ok' (Test-FreshRequest 'n-new' (Get-Now)) 'ok'
+    Check 'replayed request refused' (Test-FreshRequest 'n-new' (Get-Now)) 'replay'
+    # a whole v2 exchange: build a request like the TV, let the service answer, open the answer like the TV
+    $kb = [byte[]](Get-EncKey (Get-Sha256Hex $encTok))
+    $rn = [byte[]](Get-RandomBytes 12)
+    $rq = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject @{ cmd = 'zzz'; t = (Get-Now) } -Compress))
+    $rc = [NovaGcm]::Seal($kb, $rn, $rq, $script:ReqAad)
+    $env2 = [pscustomobject]@{ v = 2; n = [Convert]::ToBase64String($rn); c = [Convert]::ToBase64String($rc) }
+    $ex = Invoke-EncryptedRequest $env2 '192.168.1.9'
+    Check 'v2 answer is encrypted' ($null -ne $ex.key) $true
+    Check 'v2 command reached the service' ([string]$ex.resp.error) 'unknown-command'
+    $line = New-EncryptedLine ([byte[]]$ex.key) ([byte[]]$ex.nonce) $ex.resp
+    $o = ConvertFrom-Json -InputObject $line
+    $ao = [NovaGcm]::Open($kb, [Convert]::FromBase64String([string]$o.n), [Convert]::FromBase64String([string]$o.c), [byte[]]($script:ResAadPrefix + $rn))
+    Check 'v2 answer opens with the token key' ([string](ConvertFrom-Json -InputObject ([System.Text.Encoding]::UTF8.GetString($ao))).error) 'unknown-command'
+    Check 'pairing is marked as encrypted' (Test-RecEnc $encRec) $true
+    $pl = Invoke-NovaCommand ([pscustomobject]@{ cmd = 'status'; token = $encTok }) '192.168.1.9'
+    Check 'plain token refused after encryption' ([string]$pl.error) 'enc-required'
+    Check 'hello offers encryption' ((Invoke-NovaCommand ([pscustomobject]@{ cmd = 'hello' }) '192.168.1.9').enc) 1
     Check 'other ip not blocked' (Test-IpBlocked '192.168.1.78') $false
     Remove-Item -LiteralPath $tmp -Recurse -Force
     if ($script:SelfFail -eq 0) { Write-Host 'SELFTEST PASSED' } else { Write-Host ('SELFTEST FAILED: ' + $script:SelfFail); exit 1 }

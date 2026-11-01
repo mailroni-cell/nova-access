@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOVA-Share: התקנה במחשב</title>
+<!-- NOVA by Roni - S-191c 2026-11-01 - Signed: Claude Sonnet 5.5 (thread "המשך"). Install page of the NOVA-Share service (GitHub Pages of nova-access). -->
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#14161b;--muted:#5b6270;--line:#e2e5ea;--acc:#1b6fd6;--onacc:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1117;--card:#181b23;--text:#eef0f5;--muted:#9aa2b2;--line:#2a2e39;--acc:#6db3ff;--onacc:#07121f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+main{max-width:640px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:24px;font-weight:600;margin:8px 0 4px}
+p.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin:0 0 14px}
+.card h2{font-size:15px;font-weight:600;margin:0 0 10px;color:var(--muted)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;font-weight:600;text-decoration:none;cursor:pointer;margin:0 0 8px}
+.btn.main{background:var(--acc);color:var(--onacc);border-color:var(--acc);font-size:18px;padding:16px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.row .btn{margin:0}
+ol{margin:0;padding:0 20px 0 0}
+li{margin:6px 0}
+code{display:block;direction:ltr;text-align:left;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font:13px/1.5 ui-monospace,Consolas,monospace;word-break:break-all;margin:0 0 8px}
+small{color:var(--muted)}
+#share{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>מתקינים NOVA-Share במחשב</h1>
+<p class="sub">פעם אחת. אחר כך הכול נעשה מהטלוויזיה, בלי חלון פתוח.</p>
+
+<div class="card">
+  <a class="btn main" id="dl" href="https://github.com/mailroni-cell/nova-access/raw/main/share/NOVA-Share-Setup.cmd">הורד את המתקין</a>
+  <small>אם אתה בטלפון: שלח לעצמך את הדף הזה ופתח אותו במחשב.</small>
+</div>
+
+<div class="card">
+  <h2>שלח את הדף למחשב</h2>
+  <button class="btn" id="share" type="button">שתף (כל אפליקציה בטלפון)</button>
+  <div class="row">
+    <a class="btn" id="wa" href="#">וואטסאפ</a>
+    <a class="btn" id="mail" href="#">מייל</a>
+  </div>
+  <button class="btn" id="copy" type="button" style="margin-top:8px">העתק קישור</button>
+</div>
+
+<div class="card">
+  <h2>מה קורה במחשב</h2>
+  <ol>
+    <li>לוחצים פעמיים על הקובץ שהורד.</li>
+    <li>Windows שואל פעם אחת על הרשאת מנהל: לוחצים כן.</li>
+    <li>מופיע קוד של 6 ספרות (תקף 5 דקות). בטלוויזיה: הספרייה שלי, חיפוש אוטומטי, מקלידים את הקוד.</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h2>או בשורה אחת במחשב (Win+R, הדבק, Enter)</h2>
+  <code id="cmd">cmd /c curl -L -o "%TEMP%\NOVA-Share-Setup.cmd" https://github.com/mailroni-cell/nova-access/raw/main/share/NOVA-Share-Setup.cmd &amp;&amp; "%TEMP%\NOVA-Share-Setup.cmd"</code>
+  <button class="btn" id="copycmd" type="button">העתק את השורה</button>
+  <small>הורדה כזאת לא מקבלת את אזהרת SmartScreen של הדפדפן. הכול ניתן להסרה מהטלוויזיה (בדיקת תקינות, הסרת השירות), ולא נשאר קובץ במחשב.</small>
+</div>
+</main>
+<script>
+(function(){
+  var url = location.href.split('#')[0];
+  var text = 'NOVA-Share: התקנה במחשב';
+  document.getElementById('wa').href = 'https://wa.me/?text=' + encodeURIComponent(text + ' ' + url);
+  document.getElementById('mail').href = 'mailto:?subject=' + encodeURIComponent(text) + '&body=' + encodeURIComponent(url);
+  function copy(t, b, ok){
+    function done(){ var o=b.textContent; b.textContent=ok; setTimeout(function(){ b.textContent=o; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, function(){ prompt('העתק ידנית:', t); });
+    else prompt('העתק ידנית:', t);
+  }
+  var c = document.getElementById('copy');
+  c.onclick = function(){ copy(url, c, 'הועתק'); };
+  var cc = document.getElementById('copycmd');
+  cc.onclick = function(){ copy(document.getElementById('cmd').textContent, cc, 'הועתק'); };
+  if (navigator.share) {
+    var s = document.getElementById('share'); s.style.display = 'flex';
+    s.onclick = function(){ navigator.share({ title: text, url: url }).catch(function(){}); };
+  }
+})();
+</script>
+</body>
+</html>
