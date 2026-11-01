@@ -150,6 +150,34 @@ main{margin-top:calc(var(--u)*-.2)}
 .sec .row{cursor:pointer;transition:filter .12s,transform .12s}
 .sec .row:hover{filter:brightness(1.25);transform:translateY(calc(var(--u)*-.2))}
 .sec .row .q{margin-right:auto;flex:none;display:grid;place-items:center;width:calc(var(--u)*2.6);height:calc(var(--u)*2.6);border-radius:50%;border:1.5px solid rgba(255,255,255,.55);color:#fff;font:700 calc(var(--u)*1.6)/1 "Rubik",sans-serif;font-style:normal;opacity:.8}
+
+/* ---- Phone mode (S-210): send-only screen, shown on phones instead of the Windows walkthrough ---- */
+#ph{display:none}
+html.ph body{overflow:auto}
+html.ph .page,html.ph #xm{display:none!important}
+html.ph #ph{display:flex;position:relative;z-index:2;min-height:100dvh;flex-direction:column;align-items:center;justify-content:space-between;gap:14px;padding:16px 16px calc(18px + env(safe-area-inset-bottom));text-align:center;--u:min(1vh,.62vw)}
+#ph .word{font-size:min(9.5vw,44px)}
+#ph .logo{height:72px;width:100%}
+#ph .rays{width:210px;height:210px}#ph .halo{width:300px;height:80px}
+#ph h1{margin:0;font-size:clamp(22px,7vw,30px);font-weight:800;line-height:1.2}
+#ph .sub{margin:6px 0 0;font-size:clamp(14px,4vw,16px);color:var(--mu);line-height:1.45}
+#ph .main{width:100%;max-width:440px;display:flex;flex-direction:column;gap:12px}
+#ph .big{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:72px;border:0;border-radius:20px;cursor:pointer;color:#fff;font:800 clamp(22px,7vw,28px)/1 "Rubik",sans-serif;background:linear-gradient(180deg,#7ab0ff,#3f7dff 48%,#1e55d6 52%,#2f6cf0);box-shadow:0 5px 0 #153a8c,0 10px 22px rgba(5,15,70,.6)}
+#ph .big:active{transform:translateY(3px);box-shadow:0 2px 0 #153a8c}
+#ph .big svg{width:28px;height:28px;flex:none}
+#ph .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+#ph .sb{display:flex;align-items:center;justify-content:center;gap:8px;min-height:56px;border-radius:16px;border:1px solid var(--glassline);background:rgba(255,255,255,.09);color:#fff;font:700 17px/1 "Rubik",sans-serif;text-decoration:none;cursor:pointer}
+#ph .sb:active{background:rgba(255,255,255,.2)}
+#ph .sb svg{width:22px;height:22px;flex:none}
+#ph .msg{border:1px dashed var(--glassline);border-radius:14px;padding:11px 13px;background:rgba(9,18,58,.5);font-size:14.5px;line-height:1.5;color:#dbe6ff;text-align:right}
+#ph .msg b{display:block;font-size:12.5px;color:var(--mu);font-weight:500;margin-bottom:3px}
+#ph .secbox{width:100%;max-width:440px;display:flex;align-items:center;gap:12px;border:1.5px solid rgba(34,180,34,.6);border-radius:16px;padding:11px 13px;background:rgba(10,40,24,.5);text-align:right}
+#ph .secbox svg{width:42px;height:48px;flex:none}
+#ph .secbox .t{font-size:clamp(15px,4.3vw,18px);font-weight:800}
+#ph .secbox .en{font-size:11.5px;color:var(--mu);margin-top:2px;direction:ltr;text-align:right}
+#ph .secrows{width:100%;max-width:440px;display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:13.5px;color:#dbe6ff;text-align:right}
+#ph .secrows span::before{content:"✓ ";color:#4ddc4d;font-weight:800}
+#ph .foot{font-size:12.5px;color:var(--mu);max-width:440px;line-height:1.45}
 </style>
 </head>
 <body>
@@ -275,6 +303,31 @@ main{margin-top:calc(var(--u)*-.2)}
 </div>
 </div>
 
+
+<div id="ph">
+  <header>
+    <div class="logo" aria-label="SUPER NOVA"><div class="rays"></div><div class="halo"></div><div class="word"><span>SUPER NOVA</span></div></div>
+    <h1>שולחים את ההתקנה למחשב</h1>
+    <p class="sub">את ההתקנה מריצים במחשב Windows. שלחו לשם את הקישור, והמחשב יתחבר לטלוויזיה.</p>
+  </header>
+  <div class="main">
+    <button class="big" id="pshare" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 15V3"/><path d="M7.5 7.5L12 3l4.5 4.5"/></svg>שלח למחשב</button>
+    <div class="grid">
+      <a class="sb" id="pwa" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="#5be07a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l1.6-4.6A8.5 8.5 0 1 1 8 19.6z"/><path d="M9 10c.5 2.2 2.3 4 5 5l1.4-1.4-2-1-1 .8c-.8-.4-1.600-1.200-2-2l.8-1-1-2z" fill="#5be07a" stroke="none"/></svg>וואטסאפ</a>
+      <a class="sb" id="pmail" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="#9ec1ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>מייל</a>
+      <a class="sb" id="psms" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="#ffd27a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg>SMS</a>
+      <button class="sb" id="pcopy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg><span>העתק קישור</span></button>
+    </div>
+    <div class="msg"><b>ההודעה שתישלח</b>פתח את הקישור במחשב Windows, הורד והפעל, ואז הקלד בטלוויזיה את הקוד שיופיע.</div>
+  </div>
+  <div class="secbox">
+    <svg viewBox="0 0 64 70" aria-hidden="true"><defs><linearGradient id="psh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d8cf0"/><stop offset="1" stop-color="#0f5fbf"/></linearGradient></defs><path d="M32 3l25 8v21c0 16-10.5 29-25 36C17.5 61 7 48 7 32V11z" fill="url(#psh)"/><rect x="22" y="28" width="20" height="16" rx="3" fill="#fff"/><path d="M26 28v-4a6 6 0 0 1 12 0v4" fill="none" stroke="#fff" stroke-width="3.5"/></svg>
+    <div><div class="t">המערכת בטוחה ומוצפנת מקצה לקצה</div><div class="en">Approved by NOVA &copy; <span class="pyr">2026</span> · AES-256 encrypted</div></div>
+  </div>
+  <div class="secrows"><span>מסירים מהטלוויזיה בלחיצה</span><span>לא נשאר זכר במחשב</span><span>משתפים רק תיקיות שבחרת</span><span>התקשורת מוצפנת</span></div>
+  <div class="foot">ההתקנה היא קובץ Windows ולא נפתחת בטלפון.</div>
+</div>
+
 <div id="xm" role="dialog" aria-modal="true"><div class="box"><div class="top"><div class="bn" id="xn"></div><h3 id="xt"></h3></div><p id="xp"></p><button type="button" id="xc">הבנתי</button></div></div>
 <script>
 (function(){
@@ -384,6 +437,34 @@ main{margin-top:calc(var(--u)*-.2)}
   window.addEventListener('resize', function(){ init(); if (still) draw(); });
   window.addEventListener('load', function(){ size(); if (still) draw(); });
 })();
+
+  // Phone mode (S-210): a phone shows only the "send to PC" screen. ?phone=1 forces it (for previews).
+  (function(){
+    var mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || /[?&]phone=1/.test(location.search);
+    var isWin = /Windows NT/i.test(navigator.userAgent);
+    if (isWin && !/[?&]phone=1/.test(location.search)) return;
+    if (!mobile && window.innerWidth >= 820) return;
+    document.documentElement.classList.add('ph');
+    var pageUrl = location.href.split('#')[0].split('?')[0];
+    var body = 'פתח את הקישור במחשב Windows, הורד והפעל, ואז הקלד בטלוויזיה את הקוד שיופיע.';
+    var full = 'NOVA-Share: התקנה במחשב\n' + body + '\n' + pageUrl;
+    document.getElementById('pwa').href = 'https://wa.me/?text=' + encodeURIComponent(full);
+    document.getElementById('pmail').href = 'mailto:?subject=' + encodeURIComponent('NOVA-Share: התקנה במחשב') + '&body=' + encodeURIComponent(body + '\n\n' + pageUrl);
+    document.getElementById('psms').href = 'sms:?&body=' + encodeURIComponent(full);
+    var y = document.querySelectorAll('.pyr'); for (var i = 0; i < y.length; i++) y[i].textContent = new Date().getFullYear();
+    var pc = document.getElementById('pcopy');
+    pc.onclick = function(){
+      var l = pc.querySelector('span'), o = l.textContent;
+      function done(){ l.textContent = 'הועתק'; setTimeout(function(){ l.textContent = o; }, 1800); }
+      try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(full).then(done, function(){ prompt('העתק ידנית:', full); }); return; } } catch(e){}
+      prompt('העתק ידנית:', full);
+    };
+    var ps = document.getElementById('pshare');
+    ps.onclick = function(){
+      if (navigator.share) { navigator.share({ title: 'NOVA-Share: התקנה במחשב', text: body, url: pageUrl }).catch(function(){}); }
+      else { pc.click(); }
+    };
+  })();
 </script>
 </body>
 </html>
