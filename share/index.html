@@ -77,6 +77,15 @@ small{color:var(--muted)}
   c.onclick = function(){ copy(url, c, 'הועתק'); };
   var cc = document.getElementById('copycmd');
   cc.onclick = function(){ copy(document.getElementById('cmd').textContent, cc, 'הועתק'); };
+  // S-192: the installer is a Windows file; on a phone it only opens as text, so a phone gets "send the link to the PC" instead.
+  if (!/Windows NT/i.test(navigator.userAgent)) {
+    var dl = document.getElementById('dl');
+    dl.removeAttribute('href'); dl.style.display = 'none';
+    var note = document.createElement('p');
+    note.textContent = 'זה קובץ למחשב Windows ולא נפתח בטלפון. שלח את הקישור של הדף למחשב (כפתורים למטה) ופתח אותו שם.';
+    note.style.cssText = 'margin:0 0 4px;font-weight:700';
+    dl.parentNode.insertBefore(note, dl);
+  }
   if (navigator.share) {
     var s = document.getElementById('share'); s.style.display = 'flex';
     s.onclick = function(){ navigator.share({ title: text, url: url }).catch(function(){}); };
