@@ -295,6 +295,8 @@ main{margin-top:calc(var(--u)*-.2)}
     document.getElementById('phonenote').style.display = 'block';
   }
   if (navigator.share) { var s = document.getElementById('share'); s.style.display = 'flex'; s.onclick = function(){ navigator.share({ title: text, url: url }).catch(function(){}); }; }
+  // After the download button is clicked the finger and ripple disappear for good (Roni, S-193).
+  (function(){ var b = document.getElementById('dl'); if (!b) return; b.addEventListener('click', function(){ var h = b.querySelectorAll('.hand,.ripple'); for (var i = 0; i < h.length; i++) h[i].style.display = 'none'; }); })();
   // Steps 2-5: a click opens a short, simple explanation.
   var EX = {
     2: ['פותחים את הקובץ שהורדת', 'מצאו את הקובץ NOVA-Share-Setup שהורד, בדרך כלל בתיקייה "הורדות" (Downloads), ולחצו עליו פעמיים.'],
