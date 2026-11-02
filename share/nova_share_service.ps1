@@ -19,13 +19,17 @@ What (Roni approved 2026-11-01, "אשר"; no guest sharing):
   text until the first time a TV used v2 with that token; from then on that token is refused in plain text ("enc-required").
   The encryption switches itself on only after a self test (known-answer vectors) passes; otherwise hello says enc=0 and all
   stays as before. Setup keeps the existing pairings and the existing "nova" password, so an update does not break a working TV.
+S-219 (2026-11-02, Claude, thread "להמשיך את SUPER NOVA אחרי בנייה 286"): command "thumbs". When the TV finds that taking a
+  frame from a video is slow on this PC's share, it asks the service for ready pictures instead. The service uses the Windows
+  thumbnail maker (the same pictures Explorer shows, no download), keeps them in C:\ProgramData\NOVA-Share\thumbs (removed on
+  Uninstall, at most 4000 files) and sends them back as small JPEGs. Read only: nothing is written next to the movies.
 Targets Windows PowerShell 5.1 (powershell.exe). Event log (no secrets): C:\ProgramData\NOVA-Share\events.log
 #>
 [CmdletBinding()]
 param([ValidateSet('Setup', 'Run', 'Uninstall', 'SelfTest')][string]$Action = 'Setup')
 $ErrorActionPreference = 'Stop'
 
-$script:Version = '1.1.0-s191'
+$script:Version = '1.2.0-s219'
 $script:TaskName = 'NOVA-Share'
 $script:UserName = 'nova'
 $script:UdpPort = 47800
@@ -37,6 +41,8 @@ $script:CfgPath = $script:Root + '\config.json'
 $script:PairPath = $script:Root + '\pair.json'
 $script:LogPath = $script:Root + '\events.log'
 $script:ServiceCopy = $script:Root + '\nova_share_service.ps1'
+$script:ThumbDir = $script:Root + '\thumbs'
+$script:ThumbOk = $null              # S-219: $null = not loaded yet, $true / $false after the first try
 $script:Fails = @{}
 $script:AclJobs = @{}
 $script:Cfg = $null
@@ -639,6 +645,101 @@ function New-EncryptedLine([byte[]]$key, [byte[]]$reqNonce, $resp) {
 }
 
 # ── the commands the TV can send ────────────────────────────────────────────
+# ── S-219: pictures for the TV library (Windows thumbnail maker) ──────────────
+function Initialize-NovaThumb {
+    if ($null -ne $script:ThumbOk) { return $script:ThumbOk }
+    try {
+        if (-not ('NovaThumb' -as [type])) {
+            Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.IO;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+public static class NovaThumb {
+    [ComImport, Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellItemImageFactory { [PreserveSig] int GetImage(Size2 size, int flags, out IntPtr phbm); }
+    [StructLayout(LayoutKind.Sequential)] private struct Size2 { public int cx; public int cy; }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    private static extern void SHCreateItemFromParsingName(string path, IntPtr pbc, [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory ppv);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr h);
+    public static byte[] Make(string path, int width) {
+        IShellItemImageFactory f;
+        SHCreateItemFromParsingName(path, IntPtr.Zero, typeof(IShellItemImageFactory).GUID, out f);
+        IntPtr hb = IntPtr.Zero;
+        int hr;
+        try { hr = f.GetImage(new Size2 { cx = width, cy = width }, 0x8 | 0x1, out hb); }   // THUMBNAILONLY | BIGGERSIZEOK
+        finally { Marshal.ReleaseComObject(f); }
+        if (hr != 0 || hb == IntPtr.Zero) return null;
+        try {
+            using (Bitmap src = Image.FromHbitmap(hb)) {
+                if (src.Width < 16 || src.Height < 16) return null;
+                int h = Math.Max(1, (int)((long)src.Height * width / src.Width));
+                using (Bitmap dst = new Bitmap(width, h))
+                using (Graphics g = Graphics.FromImage(dst))
+                using (MemoryStream ms = new MemoryStream()) {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(src, 0, 0, width, h);
+                    ImageCodecInfo jpg = null;
+                    foreach (ImageCodecInfo c in ImageCodecInfo.GetImageEncoders()) if (c.MimeType == "image/jpeg") jpg = c;
+                    EncoderParameters ep = new EncoderParameters(1);
+                    ep.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 80L);
+                    dst.Save(ms, jpg, ep);
+                    return ms.ToArray();
+                }
+            }
+        } finally { DeleteObject(hb); }
+    }
+}
+'@
+        }
+        if (-not (Test-Path -LiteralPath $script:ThumbDir)) { New-Item -ItemType Directory -Path $script:ThumbDir -Force | Out-Null }
+        $script:ThumbOk = $true
+    } catch { Write-Event ('thumbs not available: ' + $_.Exception.Message); $script:ThumbOk = $false }
+    return $script:ThumbOk
+}
+
+function Get-NovaThumbs($req) {
+    $rec = Find-Share ([string]$req.share)
+    if (-not $rec) { return @{ ok = $false; error = 'not-found' } }
+    if (-not (Initialize-NovaThumb)) { return @{ ok = $false; error = 'no-thumbs' } }
+    $base = [System.IO.Path]::GetFullPath([string]$rec.path).TrimEnd('\')
+    $w = 320
+    try { $w = [Math]::Max(160, [Math]::Min(480, [int]$req.w)) } catch { }
+    $videoExt = @('.mkv', '.mp4', '.m4v', '.avi', '.mov', '.wmv', '.ts', '.m2ts', '.mpg', '.mpeg', '.webm', '.flv', '.3gp', '.vob')
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $out = @()
+    foreach ($rel in @($req.files | Select-Object -First 8)) {
+        $relText = [string]$rel
+        if ($sw.ElapsedMilliseconds -gt 6000) { $out += @{ p = $relText; later = $true }; continue }   # the rest in the next request
+        $item = @{ p = $relText; miss = $true }
+        try {
+            $full = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($base, $relText.Replace('/', '\').TrimStart('\')))
+            $inside = $full.StartsWith($base + '\', [System.StringComparison]::OrdinalIgnoreCase)
+            $ext = [System.IO.Path]::GetExtension($full).ToLowerInvariant()
+            if ($inside -and ($videoExt -contains $ext) -and (Test-Path -LiteralPath $full -PathType Leaf)) {
+                $fi = New-Object System.IO.FileInfo($full)
+                $key = (Get-Sha256Hex ($full.ToLowerInvariant() + '|' + $fi.Length + '|' + $fi.LastWriteTimeUtc.Ticks + '|' + $w)).Substring(0, 32)
+                $cache = $script:ThumbDir + '\' + $key + '.jpg'
+                $bytes = $null
+                if (Test-Path -LiteralPath $cache) { $bytes = [System.IO.File]::ReadAllBytes($cache) }
+                else {
+                    try { $bytes = [NovaThumb]::Make($full, $w) } catch { $bytes = $null }
+                    if ($bytes) { [System.IO.File]::WriteAllBytes($cache, $bytes) }
+                }
+                if ($bytes) { $item = @{ p = $relText; img = [Convert]::ToBase64String($bytes) } }
+            }
+        } catch { }
+        $out += $item
+    }
+    try {   # keep the picture folder small
+        $all = @(Get-ChildItem -LiteralPath $script:ThumbDir -Filter '*.jpg' -File)
+        if ($all.Count -gt 4000) { $all | Sort-Object LastWriteTimeUtc | Select-Object -First 500 | Remove-Item -Force -ErrorAction SilentlyContinue }
+    } catch { }
+    return @{ ok = $true; items = $out }
+}
+
 function Invoke-NovaCommand($req, [string]$ip, $encRec = $null) {
     $cmd = [string]$req.cmd
 
@@ -648,7 +749,7 @@ function Invoke-NovaCommand($req, [string]$ip, $encRec = $null) {
         if ($pj -and ([int64]$pj.expires -gt (Get-Now))) { $pairing = $true }
         $encFlag = 0
         if (Test-GcmReady) { $encFlag = 1 }
-        return @{ ok = $true; computer = [string]$env:COMPUTERNAME; version = $script:Version; paired = (@($script:Cfg.tokens).Count -gt 0); pairing = $pairing; enc = $encFlag }
+        return @{ ok = $true; computer = [string]$env:COMPUTERNAME; version = $script:Version; paired = (@($script:Cfg.tokens).Count -gt 0); pairing = $pairing; enc = $encFlag; thumbs = 1 }
     }
 
     if ($cmd -eq 'pair') {
@@ -772,6 +873,7 @@ function Invoke-NovaCommand($req, [string]$ip, $encRec = $null) {
             return @{ ok = $true }
         }
         'health' { return @{ ok = $true; items = (Get-Health) } }
+        'thumbs' { return (Get-NovaThumbs $req) }
         'health-fix' {
             Invoke-HealthFix
             Write-Event 'health fix run'
