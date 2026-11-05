@@ -1,4 +1,5 @@
 ﻿﻿# ─────────────────────────────────────────────────────────────────────────────
+# Updated S-289 2026-11-05 (Claude, thread "Continue NOVA: SWITCH-ACCOUNT, S-289"): a failed server check shows its exact reason (timeout, HTTP code, address not found...).
 # SUPER NOVA Admin (PC) · S-154 · 2026-10-29
 # Signed: Claude Opus 5.5 · project "SUPER NOVA" · thread "קרא MD והמשך"
 # Updated S-269 2026-11-05 (Claude Sonnet 5.5, thread "Fix NOVA Admin phone sync"): same as the phone Admin: connection bar (relay + shared list with the time), no answer keeps the last state, shared list re-read every 3 minutes, presence window 8 minutes; PcVersion 13.
@@ -358,6 +359,19 @@ function Fetch-Topic($path, [scriptblock]$done) {
         Fetch ($h + $path) { param($text, $s) $s.n++; if ($null -ne $text) { [void]$s.parts.Add($text); $s.ok = $true }; if ($s.n -eq 2) { & $s.done $(if ($s.ok) { $s.parts -join "`n" } else { $null }) } } $st
     }
 }
+# S-289 (Roni 2026-11-05: "why does it say the server is not connected"): the exact reason of a failed request, in Hebrew, instead of one general message
+function Fail-Reason($t) {
+    try {
+        if ($t.Status -eq 'Canceled') { return 'השרת לא ענה בזמן' }
+        $m = ''; $e = $t.Exception; while ($e) { $m += ' ' + $e.Message; $e = $e.InnerException }
+        if ($m -match '(\b[1-5]\d\d\b)\s*\(') { return 'השרת החזיר שגיאה ' + $Matches[1] }
+        if ($m -match '(?i)No such host|could not be resolved|name or service|nodename') { return 'כתובת השרת לא נמצאה' }
+        if ($m -match '(?i)refused|actively') { return 'השרת סירב לחיבור' }
+        if ($m -match '(?i)SSL|certificate|TLS|secure channel') { return 'שגיאת אבטחה (SSL) מול השרת' }
+        if ($m -match '(?i)timed out|timeout|canceled') { return 'השרת לא ענה בזמן' }
+    } catch { }
+    return 'אין חיבור לשרת'
+}
 function Check-Live {
     foreach ($u in @($script:users | Where-Object { $_.active -and -not $_.del })) {
         $g = $script:grants[$u.id + $u.d]
@@ -371,7 +385,7 @@ function Check-Live {
         $url = $g.s + '/player_api.php?username=' + [Uri]::EscapeDataString($g.u) + '&password=' + [Uri]::EscapeDataString($g.p)
         Fetch $url {
             param($text, $id)
-            if ($null -eq $text) { $script:live[$id] = @{ ok = $false; error = 'אין חיבור לשרת' }; return }
+            if ($null -eq $text) { $script:live[$id] = @{ ok = $false; error = $(if ($script:fetchErr) { $script:fetchErr } else { 'אין חיבור לשרת' }) }; return }
             try { $info = ($text | ConvertFrom-Json).user_info } catch { $info = $null }
             if (-not $info) { $script:live[$id] = @{ ok = $false; error = 'השרת לא החזיר פרטים' }; return }
             if ([string]$info.auth -eq '0') { $script:live[$id] = @{ ok = $false; error = 'משתמש או סיסמה שגויים' }; return }
@@ -1167,7 +1181,7 @@ $tick.Add_Tick({
     foreach ($j in @($script:jobs)) {
         if (-not $j.t.IsCompleted) { continue }
         $script:jobs.Remove($j); $doneAny = $true
-        $text = $null; if ($j.t.Status -eq 'RanToCompletion') { $text = $j.t.Result }
+        $text = $null; $script:fetchErr = $null; if ($j.t.Status -eq 'RanToCompletion') { $text = $j.t.Result } else { $script:fetchErr = Fail-Reason $j.t }
         try { & $j.done $text $j.state } catch { }
     }
     if ($doneAny -and -not $script:busy) { Refresh-UI }
