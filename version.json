@@ -1,11 +1,11 @@
 {
-  "versionCode": 359,
-  "versionName": "0.1.358",
+  "versionCode": 360,
+  "versionName": "0.1.359",
   "url": "https://github.com/mailroni-cell/nova-access/raw/main/NOVA.apk",
   "urls": [
-    "https://nova-relay.mail-roni.workers.dev/apk/b4f4f738bb210c7148fc240e418d6cb65bf50d76",
-    "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@b4f4f738bb210c7148fc240e418d6cb65bf50d76/NOVA.apk",
-    "https://raw.githubusercontent.com/mailroni-cell/nova-access/b4f4f738bb210c7148fc240e418d6cb65bf50d76/NOVA.apk"
+    "https://nova-relay.mail-roni.workers.dev/apk/89066980903546d84fc9e49fba03b51d21822d4c",
+    "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@89066980903546d84fc9e49fba03b51d21822d4c/NOVA.apk",
+    "https://raw.githubusercontent.com/mailroni-cell/nova-access/89066980903546d84fc9e49fba03b51d21822d4c/NOVA.apk"
   ],
   "admin": {
     "versionCode": 356,
