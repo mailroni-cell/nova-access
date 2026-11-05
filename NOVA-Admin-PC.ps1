@@ -1,6 +1,7 @@
 ﻿﻿# ─────────────────────────────────────────────────────────────────────────────
 # SUPER NOVA Admin (PC) · S-154 · 2026-10-29
 # Signed: Claude Opus 5.5 · project "SUPER NOVA" · thread "קרא MD והמשך"
+# Updated S-269 2026-11-05 (Claude Sonnet 5.5, thread "Fix NOVA Admin phone sync"): same as the phone Admin: connection bar (relay + shared list with the time), no answer keeps the last state, shared list re-read every 3 minutes, presence window 8 minutes; PcVersion 13.
 # Updated S-179 2026-11-01 (Claude Opus 5.5, thread "מסך הבית רחב"): "מצב קל" next to a device that runs NOVA in weak device mode; PcVersion 12.
 # What: Roni: the PC admin window always has everything the phone NOVA-Admin app has (CLAUDE.md rule S-154).
 #       Rewritten from S-018..S-098 to the phone's model (admin/AdminModel.kt, AdminData.kt, NovaCrypto.kt,
@@ -28,7 +29,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 12   # S-179
+$PcVersion = 13   # S-269
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -135,7 +136,7 @@ function H24($s) { return (Sha $s).Substring(0, 24) }
 function Cmd-Topic($code) { return 'nova-c' + (H24 "cmd|$Salt|$code") }
 function Code-Tag($code) { return (H24 "tag|$Salt|$code").Substring(0, 12) }
 $PresenceTopic = 'nova-p' + (H24 "presence|$Salt")
-$PresenceWindow = 1500   # S-159: NOVA reports on a change + every 20 minutes (ntfy.sh 250 messages a day per home); "x" = closed
+$PresenceWindow = 480   # S-269: NOVA reports on a change + every 5 minutes (was 20 min / 1500 s); "x" = closed
 $CrashTopic    = 'nova-x' + (H24 "crash|$Salt")
 $ReceiptTopic  = 'nova-r' + (H24 "receipt|$Salt")   # S-158: r1|<code tag>|<message id>|<s / c>|<device>|<model>
 # S-160 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): Roni's own relay on Cloudflare (tools/nova-relay/worker.js), same API as ntfy.sh.
@@ -380,6 +381,20 @@ function Check-Live {
         } $u.id
     }
 }
+# S-269: the live connection bar (SyncState): relay answer + shared list, with the time of the last good read
+$script:relayAt = 0; $script:relayOk = $null; $script:syncAt = 0; $script:syncOk = $null
+function Show-Conn {
+    try {
+        $t = { param($x) if ($x -gt 0) { [DateTimeOffset]::FromUnixTimeSeconds($x).LocalDateTime.ToString('dd/MM HH:mm') } else { '-' } }
+        $bad = ($script:relayOk -eq $false) -or ($script:syncOk -eq $false)
+        $unk = ($null -eq $script:relayOk) -or ($null -eq $script:syncOk)
+        $col = if ($bad) { '#E5675F' } elseif ($unk) { '#FF9F43' } else { '#4CD08A' }
+        $a = if ($script:relayOk -eq $false) { 'אין חיבור לשרת הנוכחות, מוצג המצב האחרון (' + (& $t $script:relayAt) + ')' } else { 'נוכחות ' + (& $t $script:relayAt) }
+        $b = if ($script:syncOk -eq $false) { 'קובץ משותף לא נקרא (' + (& $t $script:syncAt) + ')' } else { 'רשימה משותפת ' + (& $t $script:syncAt) }
+        $ui.SyncState.Text = "● $a · $b"
+        $ui.SyncState.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($col)
+    } catch { }
+}
 function Check-Presence {
     $now = Now-S
     $since = if ($script:historyRead) { $now - $PresenceWindow } else { $now - 12 * 3600 }
@@ -388,7 +403,8 @@ function Check-Presence {
     }
     Fetch-Topic ("$PresenceTopic/json?poll=1&since=$since") {
         param($text)
-        if ($null -eq $text) { return }
+        if ($null -eq $text) { $script:relayOk = $false; Show-Conn; return }   # S-269: no answer keeps the last state
+        $script:relayOk = $true; $script:relayAt = Now-S; Show-Conn
         $now = Now-S; $all = @{}; $fresh = @{}
         foreach ($m in (Ntfy-Parse $text)) {
             $f = $m.body -split '\|'
@@ -739,7 +755,7 @@ function Load-All {
     Work {
         $r = Load-Remote
         $script:users = @(Merge-Users $r.users @()); $script:cfg = $r.cfg; $script:msgs = @($r.msgs); Save-Cache
-        $ui.SyncState.Text = 'מחשב · מסונכרן עם הטלפון ✔'
+        $script:syncOk = $true; $script:syncAt = Now-S; Show-Conn   # S-269
         Check-Live; Check-Presence; Check-Crashes; Check-Receipts
     } 'הכול מעודכן.'
 }
@@ -1163,6 +1179,14 @@ $minute.Add_Tick({
     if (-not (Ready) -or $script:busy) { return }
     $script:minutes++
     Check-Presence; Check-Crashes; Check-Receipts   # S-158
+    if ($script:minutes % 3 -eq 0) {   # S-269: the shared list is read again (changes from the phone)
+        try {
+            $r = Load-Remote
+            $script:users = @(Merge-Users $r.users @($script:users)); $script:cfg = $r.cfg; $script:msgs = @($r.msgs); Save-Cache
+            $script:syncOk = $true; $script:syncAt = Now-S; Refresh-UI
+        } catch { $script:syncOk = $false }
+        Show-Conn
+    }
     if ($script:minutes % 5 -eq 0) { Check-Live }
     if ($script:minutes % 10 -eq 0) { Check-SelfUpdate $true }   # S-164: also while the window stays open
 })
