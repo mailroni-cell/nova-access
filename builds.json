@@ -1,5 +1,12 @@
 [
  {
+  "f": "NOVA-s293-amp-batch-366.apk",
+  "sha": "456ffe786e090774db541bcb869fa44a641e3218",
+  "mb": 56,
+  "d": "06.11 08:37",
+  "m": "S-294: show the commit message next to each test build"
+ },
+ {
   "f": "NOVA-s293-amp-batch-365.apk",
   "sha": "aa67e7f43323c015011aad7c5ac2c7ae1df42ef9",
   "mb": 56,
