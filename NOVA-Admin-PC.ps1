@@ -30,7 +30,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 13   # S-269
+$PcVersion = 14   # S-308 (device details); was 13 in S-269
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -409,6 +409,18 @@ function Show-Conn {
         $ui.SyncState.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($col)
     } catch { }
 }
+# S-308 (Roni): the lines shown for one TV: IP (external from the relay, internal from the TV), Android, NOVA, memory, storage, network.
+function Dev-Detail($d, $named) {
+    $o = @(); $i = $d.info; if (-not $i) { return $o }
+    if ($named) { $o += "• $(if ($d.model) { $d.model } else { 'מכשיר' })" }
+    $x = @(); if ($i['ip']) { $x += "IP חיצוני: $($i['ip'])" }; if ($i['li']) { $x += "פנימי: $($i['li'])" }; if ($x.Count) { $o += ($x -join ' · ') }
+    $x = @(); if ($i['an']) { $x += "אנדרואיד $($i['an'])" }; if ($d.ver -gt 0) { $x += "גרסת NOVA $($d.ver - 1)" }; if ($x.Count) { $o += ($x -join ' · ') }
+    $x = @(); if ($i['mem']) { $q = $i['mem'] -split '/'; if ($q.Count -eq 2) { $x += "זיכרון פנוי: $($q[0]) מתוך $($q[1]) MB" } }
+    if ($i['st']) { $q = $i['st'] -split '/'; if ($q.Count -eq 2) { $x += "אחסון פנוי: $($q[0]) מתוך $($q[1]) GB" } }; if ($x.Count) { $o += ($x -join ' · ') }
+    $net = $null; switch ($i['net']) { 'wifi' { $net = 'Wi-Fi' } 'eth' { $net = 'כבל' } 'cell' { $net = 'סלולרי' } }
+    if ($net) { if ($i['ss']) { $net += " $($i['ss'])" }; if ($i['rs']) { $net += " (חוזק $($i['rs']) dBm)" }; $o += "חיבור: $net" }
+    return $o
+}
 function Check-Presence {
     $now = Now-S
     $since = if ($script:historyRead) { $now - $PresenceWindow } else { $now - 12 * 3600 }
@@ -424,7 +436,8 @@ function Check-Presence {
             $f = $m.body -split '\|'
             if ($f.Count -lt 6 -or $f[0] -ne 'v1') { continue }
             $ver = 0; if ($f.Count -gt 6) { [void][int]::TryParse($f[6], [ref]$ver) }
-            $s = [pscustomobject]@{ dev = $f[2]; tv = ($f[3] -eq 'tv'); playing = ($f[4] -eq 'p'); closed = ($f[4] -eq 'x'); model = $f[5]; at = $m.at; ver = $ver; lite = ($f.Count -gt 7 -and $f[7] -eq 'L') }   # S-179
+            $di = @{}; for ($k = 7; $k -lt $f.Count; $k++) { $t = $f[$k]; if ($t.StartsWith('ip=')) { $di['ip'] = $t.Substring(3) } elseif ($t.StartsWith('x:')) { foreach ($kv in $t.Substring(2).Split(';')) { $kk, $vv = $kv.Split('=', 2); if ($kk) { $di[$kk] = $vv } } } }   # S-308: device details
+            $s = [pscustomobject]@{ dev = $f[2]; tv = ($f[3] -eq 'tv'); playing = ($f[4] -eq 'p'); closed = ($f[4] -eq 'x'); model = $f[5]; at = $m.at; ver = $ver; lite = ($f.Count -gt 7 -and $f[7] -eq 'L'); info = $di }   # S-179
             if (-not $all.ContainsKey($f[1])) { $all[$f[1]] = New-Object System.Collections.ArrayList }
             [void]$all[$f[1]].Add($s)
             if ($m.at -lt $now - $PresenceWindow) { continue }
@@ -842,7 +855,8 @@ function Show-Card {
     if (-not $adm) { $info += $(if ($u.x -gt 0) { "תוקף החשבון: עד $(Day $u.x)" } else { 'תוקף החשבון: ללא הגבלה' }) }
     $devs = @($script:devices[$u.id] | Where-Object { $_ })
     if ($devs.Count -eq 1) { $info += "פתוח עכשיו ב: $($devs[0].model)$(if ($devs[0].playing) { ' · צופה' } else { '' })$(if ($devs[0].lite) { ' · מצב קל' } else { '' })" }   # S-179
-    $ui.CInfo.Text = ($info -join ' · ')
+    $det = @(); foreach ($dv in $devs) { $det += @(Dev-Detail $dv ($devs.Count -gt 1)) }   # S-308
+    $ui.CInfo.Text = ($info -join ' · ') + $(if ($det.Count) { "`n" + ($det -join "`n") } else { '' })
     $sn = Shared-Note $u
     $ui.CShared.Text = $sn; $ui.CShared.Visibility = $(if ($sn) { 'Visible' } else { 'Collapsed' }); $ui.BShared.Visibility = $ui.CShared.Visibility
     $ui.CSteps.Children.Clear()
