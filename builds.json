@@ -1,5 +1,12 @@
 [
  {
+  "f": "NOVA-s293-amp-batch-367.apk",
+  "sha": "47f7c2004a628538f0e0596fc45c34c324399519",
+  "mb": 56,
+  "d": "06.11 09:02",
+  "m": "S-295: admin-only network info row in Settings"
+ },
+ {
   "f": "NOVA-s293-amp-batch-366.apk",
   "sha": "456ffe786e090774db541bcb869fa44a641e3218",
   "mb": 56,
