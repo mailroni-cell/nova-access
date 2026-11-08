@@ -2,6 +2,7 @@
 # Updated S-289 2026-11-05 (Claude, thread "Continue NOVA: SWITCH-ACCOUNT, S-289"): a failed server check shows its exact reason (timeout, HTTP code, address not found...).
 # SUPER NOVA Admin (PC) · S-154 · 2026-10-29
 # Signed: Claude Opus 5.5 · project "SUPER NOVA" · thread "קרא MD והמשך"
+# Updated S-336 2026-11-08 (Claude Sonnet 5.5, thread "NOVA Admin real time"): reads the relay /state list (one source of truth); PcVersion 15.
 # Updated S-269 2026-11-05 (Claude Sonnet 5.5, thread "Fix NOVA Admin phone sync"): same as the phone Admin: connection bar (relay + shared list with the time), no answer keeps the last state, shared list re-read every 3 minutes, presence window 8 minutes; PcVersion 13.
 # Updated S-179 2026-11-01 (Claude Opus 5.5, thread "מסך הבית רחב"): "מצב קל" next to a device that runs NOVA in weak device mode; PcVersion 12.
 # What: Roni: the PC admin window always has everything the phone NOVA-Admin app has (CLAUDE.md rule S-154).
@@ -30,7 +31,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 14   # S-308 (device details); was 13 in S-269
+$PcVersion = 15   # S-336 (relay /state); was 14 in S-308
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -418,10 +419,42 @@ function Dev-Detail($d, $named) {
     $x = @(); if ($i['mem']) { $q = $i['mem'] -split '/'; if ($q.Count -eq 2) { $x += "זיכרון פנוי: $($q[0]) מתוך $($q[1]) MB" } }
     if ($i['st']) { $q = $i['st'] -split '/'; if ($q.Count -eq 2) { $x += "אחסון פנוי: $($q[0]) מתוך $($q[1]) GB" } }; if ($x.Count) { $o += ($x -join ' · ') }
     $net = $null; switch ($i['net']) { 'wifi' { $net = 'Wi-Fi' } 'eth' { $net = 'כבל' } 'cell' { $net = 'סלולרי' } }
+    if ($i['jk'] -eq '1') { $o += ('⚠ הממשק מקרטע במכשיר הזה (מומלץ מצב מכשיר חלש, ' + $(if ($d.lite) { 'דלוק' } else { 'כבוי' }) + ')') }   # S-336
     if ($net) { if ($i['ss']) { $net += " $($i['ss'])" }; if ($i['rs']) { $net += " (חוזק $($i['rs']) dBm)" }; $o += "חיבור: $net" }
     return $o
 }
+# S-336 2026-11-08 (Claude Sonnet 5.5, thread "NOVA phone layout"): the relay keeps ONE finished device list (online / closed / age); this window shows exactly
+# that list, like the phone Admin. If the relay is old or does not answer, Check-Presence below judges the raw messages as before ($script:stateOk = $false).
+$script:stateOk = $false
+function Check-State {
+    $now = Now-S
+    Fetch ($RelayHost + $PresenceTopic + '/state?t=' + $now) {
+        param($text)
+        if ($null -eq $text) { $script:stateOk = $false; return }
+        try {
+            $j = $text | ConvertFrom-Json
+            if ($null -eq $j.now) { $script:stateOk = $false; return }
+            $byTag = @{}
+            foreach ($r in @($j.devices)) {
+                if (-not $r.online) { continue }
+                $di = @{}; foreach ($kv in ([string]$r.info).Split(';')) { $kk, $vv = $kv.Split('=', 2); if ($kk) { $di[$kk] = $vv } }
+                if ($r.ip) { $di['ip'] = [string]$r.ip }
+                $s = [pscustomobject]@{ dev = [string]$r.dev; tv = [bool]$r.tv; playing = [bool]$r.playing; closed = $false; model = [string]$r.model; at = [int64]$r.seen; ver = [int]$r.ver; lite = [bool]$r.lite; info = $di }
+                $tg = [string]$r.tag
+                if (-not $byTag.ContainsKey($tg)) { $byTag[$tg] = New-Object System.Collections.ArrayList }
+                [void]$byTag[$tg].Add($s)
+            }
+            $dev = @{}
+            foreach ($u in $script:users) {
+                $tag = Code-Tag (Normalize $u.pretty)
+                if ($byTag.ContainsKey($tag)) { $open = @($byTag[$tag] | Sort-Object -Property at -Descending); if ($open.Count) { $dev[$u.id] = $open } }
+            }
+            $script:devices = $dev; $script:stateOk = $true
+        } catch { $script:stateOk = $false }
+    } $null
+}
 function Check-Presence {
+    Check-State
     $now = Now-S
     $since = if ($script:historyRead) { $now - $PresenceWindow } else { $now - 12 * 3600 }
     if (-not $script:historyRead) {
@@ -444,10 +477,10 @@ function Check-Presence {
             if (-not $fresh.ContainsKey($f[1])) { $fresh[$f[1]] = @{} }
             $p = $fresh[$f[1]][$s.dev]; if (-not $p -or $p.at -le $s.at) { $fresh[$f[1]][$s.dev] = $s }
         }
-        $script:devices = @{}
+        if (-not $script:stateOk) { $script:devices = @{} }   # S-336: with the relay's finished list the devices come from Check-State
         foreach ($u in $script:users) {
             $tag = Code-Tag (Normalize $u.pretty)
-            if ($fresh.ContainsKey($tag)) { $open = @($fresh[$tag].Values | Where-Object { -not $_.closed } | Sort-Object -Property at -Descending); if ($open.Count) { $script:devices[$u.id] = $open } }   # S-159
+            if (-not $script:stateOk -and $fresh.ContainsKey($tag)) { $open = @($fresh[$tag].Values | Where-Object { -not $_.closed } | Sort-Object -Property at -Descending); if ($open.Count) { $script:devices[$u.id] = $open } }   # S-159
             if ($all.ContainsKey($tag)) { Inst-Seen $u.id @($all[$tag]) }
         }
         Save-Inst
@@ -1201,13 +1234,13 @@ $tick.Add_Tick({
     if ($doneAny -and -not $script:busy) { Refresh-UI }
 })
 $tick.Start()
-$minute = New-Object Windows.Threading.DispatcherTimer; $minute.Interval = [TimeSpan]::FromSeconds(60)
+$minute = New-Object Windows.Threading.DispatcherTimer; $minute.Interval = [TimeSpan]::FromSeconds(30)   # S-336: was 60 s
 $script:minutes = 0
 $minute.Add_Tick({
     if (-not (Ready) -or $script:busy) { return }
     $script:minutes++
     Check-Presence; Check-Crashes; Check-Receipts   # S-158
-    if ($script:minutes % 3 -eq 0) {   # S-269: the shared list is read again (changes from the phone)
+    if ($script:minutes % 6 -eq 0) {   # S-269: the shared list is read again (changes from the phone); S-336: ticks are 30 s now
         try {
             $r = Load-Remote
             $script:users = @(Merge-Users $r.users @($script:users)); $script:cfg = $r.cfg; $script:msgs = @($r.msgs); Save-Cache
@@ -1215,8 +1248,8 @@ $minute.Add_Tick({
         } catch { $script:syncOk = $false }
         Show-Conn
     }
-    if ($script:minutes % 5 -eq 0) { Check-Live }
-    if ($script:minutes % 10 -eq 0) { Check-SelfUpdate $true }   # S-164: also while the window stays open
+    if ($script:minutes % 10 -eq 0) { Check-Live }   # S-336: ticks are 30 s
+    if ($script:minutes % 20 -eq 0) { Check-SelfUpdate $true }   # S-164: also while the window stays open
 })
 $minute.Start()
 
