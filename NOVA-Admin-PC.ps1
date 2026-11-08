@@ -1,3 +1,4 @@
+# Updated S-348 2026-11-08 (Claude Sonnet 5.5, thread "סגור שיחה קודמת, קרא handoff והמשך"): IP and model of every open device on each user row; PcVersion 16.
 ﻿﻿# ─────────────────────────────────────────────────────────────────────────────
 # Updated S-289 2026-11-05 (Claude, thread "Continue NOVA: SWITCH-ACCOUNT, S-289"): a failed server check shows its exact reason (timeout, HTTP code, address not found...).
 # SUPER NOVA Admin (PC) · S-154 · 2026-10-29
@@ -31,7 +32,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 15   # S-336 (relay /state); was 14 in S-308
+$PcVersion = 16   # S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -854,6 +855,8 @@ function Refresh-UI {
         $l = $script:live[$u.id]; if ($l -and $l.exp) { $ex += "בתוקף עד $(Day $l.exp)" }
         if ($u.x -gt 0) { $ex += "NOVA עד $(Day $u.x)"; if (Expired $u) { $exc = $Red } }
         $sn = Shared-Note $u; if ($sn) { $ex += $sn; $exc = $Orange }
+        # S-348 (Roni 2026-11-08): every open device on the row itself: type, model and IP (external, then internal), no click needed
+        foreach ($dv in @($script:devices[$u.id] | Where-Object { $_ })) { $ip = @(); if ($dv.info -and $dv.info['ip']) { $ip += [string]$dv.info['ip'] }; if ($dv.info -and $dv.info['li']) { $ip += [string]$dv.info['li'] }; $ex += (($(if ($dv.tv) { '📺' } else { '📱' })) + ' ' + $(if ($dv.model) { $dv.model } else { 'מכשיר' }) + $(if ($ip.Count) { ' · ' + ($ip -join ' / ') } else { '' })) }
         $lm = Last-Msg $u; $ms = $(if ($lm) { Msg-State $lm $u.id } else { @($Muted, '') })   # S-158
         $tagBg = $(if ($tg[0] -eq $Green) { '#1F3A2A' } elseif ($tg[0] -eq $Orange) { '#3A321F' } else { '#252830' })
         [pscustomobject]@{ Id = $u.id; Name = $(if ($adm) { "👑 $($u.name)" } else { $u.name }); NameFg = $(if ($adm) { $Gold } else { '#FFFFFF' })
