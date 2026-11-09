@@ -32,7 +32,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 16   # S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 17   # S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -194,7 +194,7 @@ function New-U($s) {
     return [pscustomobject]@{
         id = [string]$s.id; name = [string]$s.name; pretty = [string]$s.pretty; d = [string]$s.d; date = [string](Prop $s 'date' '')
         active = [bool](Prop $s 'active' $true); phone = [string](Prop $s 'phone' ''); mail = [string](Prop $s 'mail' '')
-        mod = [int64](Prop $s 'mod' 0); del = [bool](Prop $s 'del' $false); x = [int64](Prop $s 'x' 0); adm = [bool](Prop $s 'adm' $false)
+        mod = [int64](Prop $s 'mod' 0); del = [bool](Prop $s 'del' $false); x = [int64](Prop $s 'x' 0); adm = [bool](Prop $s 'adm' $false); k = [int](Prop $s 'k' 0)   # S-385
         inv = [int64](Prop $s 'inv' 0); invVia = [string](Prop $s 'invVia' ''); inst = [int64](Prop $s 'inst' 0)   # S-155
     }
 }
@@ -224,7 +224,7 @@ function Load-Remote {
 }
 function List-Json($users, $cfg, $msgs) {
     $u = @($users | ForEach-Object { [ordered]@{ id = $_.id; name = $_.name; pretty = $_.pretty; d = $_.d; date = $_.date; active = [bool]$_.active
-        phone = $_.phone; mail = $_.mail; mod = [int64]$_.mod; del = [bool]$_.del; x = [int64]$_.x; adm = [bool]$_.adm; inv = [int64]$_.inv; invVia = $_.invVia; inst = [int64]$_.inst } })
+        phone = $_.phone; mail = $_.mail; mod = [int64]$_.mod; del = [bool]$_.del; x = [int64]$_.x; k = [int]$_.k; adm = [bool]$_.adm; inv = [int64]$_.inv; invVia = $_.invVia; inst = [int64]$_.inst } })
     $m = [object[]]@(@($msgs) | Where-Object { $_ } | ForEach-Object { M-Json $_ })   # S-158: the message log rides along
     return (ConvertTo-Json -InputObject ([ordered]@{ users = $u; cfg = [ordered]@{ server = $cfg.server; link = $cfg.link; dlcode = $cfg.dlcode }; msgs = $m }) -Depth 8 -Compress)
 }
@@ -272,13 +272,14 @@ function Publish-Codes($users) {
             if ($u) {
                 Set-P $c 'd' $u.d
                 if ($u.x -gt 0) { Set-P $c 'x' ([int64]$u.x) } elseif (Has $c 'x') { $c.PSObject.Properties.Remove('x') }
+                if ($u.k -gt 1) { Set-P $c 'k' ([int]$u.k) } elseif (Has $c 'k') { $c.PSObject.Properties.Remove('k') }   # S-385: screens at once
             }
             [void]$kept.Add($c)
         }
         $have = @($kept | ForEach-Object { $_.id })
         foreach ($u in $on.Values) {
             if ($have -contains $u.id) { continue }
-            $e = [ordered]@{ id = $u.id; d = $u.d }; if ($u.x -gt 0) { $e.x = [int64]$u.x }
+            $e = [ordered]@{ id = $u.id; d = $u.d }; if ($u.x -gt 0) { $e.x = [int64]$u.x }; if ($u.k -gt 1) { $e.k = [int]$u.k }
             [void]$kept.Add([pscustomobject]$e)
         }
         $text = '{"v":1,"codes":' + (ConvertTo-Json -InputObject @($kept) -Compress -Depth 4) + '}'
@@ -732,6 +733,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
               <Button x:Name="BRename" Content="שנה שם תצוגה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BLogin" Content="שנה משתמש וסיסמה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BExpiry" Content="📅 תוקף החשבון" Style="{StaticResource Ghost}"/>
+              <Button x:Name="BScreens" Content="📺 מסכים בו-זמנית: 1" Style="{StaticResource Ghost}"/>
               <Button x:Name="BReveal" Content="קוד להצגת פרטים בטלוויזיה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BNewCode" Content="קוד חדש" Style="{StaticResource Ghost}"/>
               <Button x:Name="BAdmin" Content="👑 הפוך לקוד מנהל שלי" Style="{StaticResource Ghost}"/>
@@ -919,10 +921,12 @@ function Show-Card {
     $ui.BAdmin.Content = $(if ($adm) { '👑 קוד מנהל: פעיל (לחץ להחזיר למשתמש רגיל)' } else { '👑 הפוך לקוד מנהל שלי' })
     $ui.BExpiry.Content = $(if ($u.x -gt 0) { "📅 תוקף החשבון: עד $(Day $u.x)" } else { '📅 תוקף החשבון: ללא הגבלה' })
     $ui.BExpiry.Visibility = $(if ($adm) { 'Collapsed' } else { 'Visible' })
+    $ui.BScreens.Content = "📺 מסכים בו-זמנית: $([Math]::Max(1, [int]$u.k))"   # S-385
+    $ui.BScreens.Visibility = $(if ($adm) { 'Collapsed' } else { 'Visible' })
     $ui.BOff.Visibility = $(if (-not $adm -and $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BOn.Visibility = $(if (-not $adm -and -not $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BDel.Visibility = $ui.BOn.Visibility
-    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BRemind', 'BExpiry') { $ui[$b].IsEnabled = -not $script:busy }
+    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BRemind', 'BExpiry', 'BScreens') { $ui[$b].IsEnabled = -not $script:busy }
 }
 
 # ── actions (AdminModel.kt) ──────────────────────────────────────────────────
@@ -1005,6 +1009,22 @@ function Pick-Expiry($u) {
     if ($null -eq $d.result) { return }
     $until = [int64]$d.result; $id = $u.id; $nm = $u.name
     Work { Change { param($L) $x = Find $L.users $id; $x.x = $until; $x.mod = Now-Ms } } $(if ($until -gt 0) { "$nm בתוקף עד $(Day $until)." } else { "ל-$nm אין תאריך סיום." })
+}
+# S-385 2026-11-09 (Claude, thread "Build NOVA app for Windows"): Roni: one device streams per code; more devices at once only when set here (same as the phone Admin).
+function Pick-Screens($u) {
+    $d = New-Dialog "מסכים בו-זמנית ל-$($u.name)"
+    [void](Add-Text $d 'כמה מכשירים יכולים לצפות בערוצים ובסרטים באותו זמן עם הקוד הזה. מכשיר נוסף יראה "הקוד משדר במכשיר אחר" ויוכל להעביר אליו את הצפייה.' $null)
+    $cur = [Math]::Max(1, [int]$u.k)
+    foreach ($n in 1..5) {
+        $t = $(if ($n -eq 1) { 'מסך אחד' } else { "$n מסכים" }) + $(if ($n -eq $cur) { '  ✓ עכשיו' } else { '' })
+        $b = Add-Btn $d $t ($n -eq $cur) { param($x, $v) Close-Dlg $x $v }
+        $b.Tag.v = $n
+    }
+    [void](Add-Btn $d 'ביטול' $false { param($x) Close-Dlg $x $null })
+    [void]$d.win.ShowDialog()
+    if ($null -eq $d.result) { return }
+    $k = [int]$d.result; $id = $u.id; $nm = $u.name
+    Work { Change { param($L) $x = Find $L.users $id; if ($x.PSObject.Properties['k']) { $x.k = $(if ($k -gt 1) { $k } else { 0 }) } else { $x | Add-Member -NotePropertyName k -NotePropertyValue $(if ($k -gt 1) { $k } else { 0 }) }; $x.mod = Now-Ms } } $(if ($k -gt 1) { "${nm}: עד $k מסכים בו-זמנית." } else { "${nm}: מסך אחד בלבד." })
 }
 function Show-Reveal($u) {
     $rc = Reveal-Code $u.pretty
@@ -1177,6 +1197,7 @@ $ui.BLogin.Add_Click({
     $np = $null
 })
 $ui.BExpiry.Add_Click({ $u = Cur; if ($u) { Pick-Expiry $u } })
+$ui.BScreens.Add_Click({ $u = Cur; if ($u) { Pick-Screens $u } })   # S-385
 $ui.BReveal.Add_Click({ $u = Cur; if ($u) { Show-Reveal $u } })
 $ui.BNewCode.Add_Click({
     $u = Cur; if (-not $u) { return }
