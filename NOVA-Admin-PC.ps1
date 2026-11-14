@@ -35,7 +35,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 24   # S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 25   # S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -339,7 +339,7 @@ function Inst-Seen($id, $reports) {
 }
 
 # ── live state: server status, devices (presence), crash logs ────────────────
-$script:live = @{}; $script:devices = @{}; $script:admins = @{}; $script:grants = @{}
+$script:live = @{}; $script:devices = @{}; $script:idleDevs = @{}; $script:orphans = @(); $script:admins = @{}; $script:grants = @{}
 $script:novaLatest = 0; $script:historyRead = $false
 $script:crash = [pscustomobject]@{ since = ((Now-S) - 12 * 3600); read = 0; logs = @() }
 try { $c = (Read-Text $crashFile) | ConvertFrom-Json; if ($c) { $script:crash = $c; $script:crash.logs = @($c.logs | Where-Object { $_ }) } } catch { }
@@ -498,7 +498,7 @@ function Check-Presence {
             if (-not $fresh.ContainsKey($f[1])) { $fresh[$f[1]] = @{} }
             $p = $fresh[$f[1]][$s.dev]; if (-not $p -or $p.at -le $s.at) { $fresh[$f[1]][$s.dev] = $s }
         }
-        if (-not $script:stateOk) { $script:devices = @{} }   # S-336: with the relay's finished list the devices come from Check-State
+        if (-not $script:stateOk) { $script:devices = @{}; $script:idleDevs = @{} }   # S-336: with the relay's finished list the devices come from Check-State
         foreach ($u in $script:users) {
             $tag = Code-Tag (Normalize $u.pretty)
             if (-not $script:stateOk -and $fresh.ContainsKey($tag)) { $open = @($fresh[$tag].Values | Where-Object { -not $_.closed } | Sort-Object -Property at -Descending); if ($open.Count) { $script:devices[$u.id] = $open } }   # S-159
@@ -611,7 +611,7 @@ function Install-Tag($u) {
 }
 function Shared-Note($u) {   # S-390, S-394, S-395: every open device (also approved / blocked) + devices seen in 24 h that are not open now; admin code = info only
     $d = @($script:devices[$u.id] | Where-Object { $_ })
-    $idle = @($script:idleDevs[$u.id] | Where-Object { $_ })
+    $idle = @(); if ($script:idleDevs) { $idle = @($script:idleDevs[$u.id] | Where-Object { $_ }) }   # S-398: indexing a null map threw "Cannot index into a null array"
     $all = @($d) + @($idle); if ($all.Count -lt 2) { return $null }
     $keys = @($all | ForEach-Object { if ($_.info -and $_.info['ip']) { $ip = [string]$_.info['ip']; if ($ip.Contains(':')) { ($ip.Split(':') | Select-Object -First 4) -join ':' } else { $ip } } else { '' } })   # IPv6 outside addresses change per connection
     $net = ''; if (-not ($keys -contains '')) { $net = $(if (@($keys | Select-Object -Unique).Count -eq 1) { ' · באותה רשת (אותו בית)' } else { ' · ברשתות שונות (בתים שונים)' }) }
