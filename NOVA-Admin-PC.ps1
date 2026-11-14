@@ -1,4 +1,6 @@
-﻿# Updated S-386 2026-11-12 (Claude Sonnet 5.5, thread "מגבר חדש באנדרואיד"): UTF-8 BOM restored, PcVersion 18.
+﻿# Updated S-391 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): approve / block per device (button on the code card); the shared alert counts only devices without a rule.
+# Updated S-390 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): several devices on one code listed one per line (model, internal IP, device id) with a same-network note; PcVersion 19.
+# Updated S-386 2026-11-12 (Claude Sonnet 5.5, thread "מגבר חדש באנדרואיד"): UTF-8 BOM restored, PcVersion 18.
 # Updated S-348 2026-11-08 (Claude Sonnet 5.5, thread "סגור שיחה קודמת, קרא handoff והמשך"): IP and model of every open device on each user row; PcVersion 16.
 # ─────────────────────────────────────────────────────────────────────────────
 # Updated S-289 2026-11-05 (Claude, thread "Continue NOVA: SWITCH-ACCOUNT, S-289"): a failed server check shows its exact reason (timeout, HTTP code, address not found...).
@@ -33,7 +35,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 18   # S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 24   # S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -409,7 +411,8 @@ function Show-Conn {
         $col = if ($bad) { '#E5675F' } elseif ($unk) { '#FF9F43' } else { '#4CD08A' }
         $a = if ($script:relayOk -eq $false) { 'אין חיבור לשרת הנוכחות, מוצג המצב האחרון (' + (& $t $script:relayAt) + ')' } else { 'נוכחות ' + (& $t $script:relayAt) }
         $b = if ($script:syncOk -eq $false) { 'קובץ משותף לא נקרא (' + (& $t $script:syncAt) + ')' } else { 'רשימה משותפת ' + (& $t $script:syncAt) }
-        $ui.SyncState.Text = "● $a · $b"
+        $oph = $(if (@($script:orphans).Count) { ' · ⚠ פתוח בקוד שלא ברשימה: ' + ((@($script:orphans) | Select-Object -First 3) -join ', ') } else { '' })
+        $ui.SyncState.Text = "● $a · $b$oph"
         $ui.SyncState.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($col)
     } catch { }
 }
@@ -437,12 +440,17 @@ function Check-State {
         try {
             $j = $text | ConvertFrom-Json
             if ($null -eq $j.now) { $script:stateOk = $false; return }
-            $byTag = @{}
+            $byTag = @{}; $idleTag = @{}
             foreach ($r in @($j.devices)) {
-                if (-not $r.online) { continue }
+                if (-not $r.online) {   # S-394: not open now, kept for the "devices on this code" note
+                    $di0 = @{}; foreach ($kv in ([string]$r.info).Split(';')) { $kk, $vv = $kv.Split('=', 2); if ($kk) { $di0[$kk] = $vv } }
+                    $s0 = [pscustomobject]@{ dev = [string]$r.dev; tv = [bool]$r.tv; closed = [bool]$r.closed; model = [string]$r.model; at = [int64]$r.seen; info = $di0; rule = [string]$r.rule }
+                    $tg0 = [string]$r.tag; if (-not $idleTag.ContainsKey($tg0)) { $idleTag[$tg0] = New-Object System.Collections.ArrayList }; [void]$idleTag[$tg0].Add($s0)
+                    continue
+                }
                 $di = @{}; foreach ($kv in ([string]$r.info).Split(';')) { $kk, $vv = $kv.Split('=', 2); if ($kk) { $di[$kk] = $vv } }
                 if ($r.ip) { $di['ip'] = [string]$r.ip }
-                $s = [pscustomobject]@{ dev = [string]$r.dev; tv = [bool]$r.tv; playing = [bool]$r.playing; closed = $false; model = [string]$r.model; at = [int64]$r.seen; ver = [int]$r.ver; lite = [bool]$r.lite; info = $di }
+                $s = [pscustomobject]@{ dev = [string]$r.dev; tv = [bool]$r.tv; playing = [bool]$r.playing; closed = $false; model = [string]$r.model; at = [int64]$r.seen; ver = [int]$r.ver; lite = [bool]$r.lite; info = $di; rule = [string]$r.rule }
                 $tg = [string]$r.tag
                 if (-not $byTag.ContainsKey($tg)) { $byTag[$tg] = New-Object System.Collections.ArrayList }
                 [void]$byTag[$tg].Add($s)
@@ -452,6 +460,16 @@ function Check-State {
                 $tag = Code-Tag (Normalize $u.pretty)
                 if ($byTag.ContainsKey($tag)) { $open = @($byTag[$tag] | Sort-Object -Property at -Descending); if ($open.Count) { $dev[$u.id] = $open } }
             }
+            # S-393 (Roni 2026-11-14: Admin said "not watching" while he watched): devices that are open on a code that is NOT in this list are shown in the status line, not dropped.
+            $known = @{}; foreach ($u in $script:users) { $known[(Code-Tag (Normalize $u.pretty))] = $true }
+            $orph = @(); foreach ($tg in $byTag.Keys) { if (-not $known.ContainsKey($tg)) { foreach ($x in $byTag[$tg]) { $orph += ($x.model + $(if ($x.playing) { ' (צופה)' } else { '' })) } } }
+            $script:orphans = $orph
+            $idleMap = @{}
+            foreach ($u in $script:users) {
+                $tg1 = Code-Tag (Normalize $u.pretty)
+                if ($idleTag.ContainsKey($tg1)) { $openDevs = @($dev[$u.id] | ForEach-Object { $_.dev }); $iv = @($idleTag[$tg1] | Where-Object { $openDevs -notcontains $_.dev } | Sort-Object -Property at -Descending); if ($iv.Count) { $idleMap[$u.id] = $iv } }
+            }
+            $script:idleDevs = $idleMap
             $script:devices = $dev; $script:stateOk = $true
         } catch { $script:stateOk = $false }
     } $null
@@ -579,8 +597,9 @@ function Status-Of($u) {
     if (-not $st) { return @($Muted, 'בודק...') }
     if (-not $st.ok) { return @($Red, $st.error) }
     if ($st.status -and $st.status -ne 'Active') { return @($Red, "בשרת: $($st.status)") }
-    if ($devs | Where-Object { $_.playing }) { return @($Green, 'צופה עכשיו') }
-    if ($devs.Count) { return @($Gold, 'NOVA פתוחה · לא צופה') }
+    $stale = ''; if ($devs.Count) { $ag = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [int64](@($devs | ForEach-Object { $_.at }) | Measure-Object -Maximum).Maximum; if ($ag -gt 120) { $stale = " · דיווח אחרון לפני $([int][Math]::Floor($ag / 60)) דק'" } }   # S-397
+    if ($devs | Where-Object { $_.playing }) { return @($Green, ('צופה עכשיו' + $stale)) }
+    if ($devs.Count) { return @($Gold, ('NOVA פתוחה · לא צופה' + $stale)) }
     return @($Muted, 'פעיל · NOVA סגורה')
 }
 function Inst-MaxVer($i) { $m = 0; foreach ($p in $i.d.PSObject.Properties) { if ([int]$p.Value.ver -gt $m) { $m = [int]$p.Value.ver } }; return $m }
@@ -590,9 +609,21 @@ function Install-Tag($u) {
     if ([int64]$i.i -gt 0) { return @($Orange, '⏳ הוזמן · טרם הותקן') }
     return @($Muted, 'טרם נשלחה הזמנה')
 }
-function Shared-Note($u) {
-    $d = @($script:devices[$u.id] | Where-Object { $_ }); if ($d.Count -lt 2) { return $null }
-    return "⚠ פתוח עכשיו ב-$($d.Count) מכשירים: " + (($d | ForEach-Object { $(if ($_.tv) { '📺 ' } else { '📱 ' }) + $(if ($_.model) { $_.model } else { 'מכשיר' }) + $(if ($_.playing) { ' (צופה)' } else { '' }) + $(if ($_.lite) { ' (מצב קל)' } else { '' }) }) -join ' · ')   # S-179
+function Shared-Note($u) {   # S-390, S-394, S-395: every open device (also approved / blocked) + devices seen in 24 h that are not open now; admin code = info only
+    $d = @($script:devices[$u.id] | Where-Object { $_ })
+    $idle = @($script:idleDevs[$u.id] | Where-Object { $_ })
+    $all = @($d) + @($idle); if ($all.Count -lt 2) { return $null }
+    $keys = @($all | ForEach-Object { if ($_.info -and $_.info['ip']) { $ip = [string]$_.info['ip']; if ($ip.Contains(':')) { ($ip.Split(':') | Select-Object -First 4) -join ':' } else { $ip } } else { '' } })   # IPv6 outside addresses change per connection
+    $net = ''; if (-not ($keys -contains '')) { $net = $(if (@($keys | Select-Object -Unique).Count -eq 1) { ' · באותה רשת (אותו בית)' } else { ' · ברשתות שונות (בתים שונים)' }) }
+    $nowS = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $ago = { param($t) $q = [Math]::Max(0, $nowS - $t); if ($q -lt 90) { "$q שנ'" } elseif ($q -lt 3600) { "$([int][Math]::Floor($q / 60)) דק'" } else { "$([int][Math]::Floor($q / 3600)) שע'" } }
+    $rl = { param($x) $(if ($x.rule -eq 'ok') { ' · ✅ מאושר' } elseif ($x.rule -eq 'block') { ' · ⛔ חסום' } else { '' }) }
+    $line = { param($x, $state) '• ' + $(if ($x.tv) { '📺 ' } else { '📱 ' }) + $(if ($x.model) { $x.model } else { 'מכשיר' }) + $(if ($x.info -and $x.info['li']) { " · פנימי $($x.info['li'])" } else { '' }) + " · מזהה $(([string]$x.dev).Substring(0, [Math]::Min(4, ([string]$x.dev).Length))) · $state" }
+    $open = @($d | Where-Object { -not $_.rule }).Count
+    $head = $(if (Is-Admin $u) { "👑 קוד מנהל (ללא חסימות): $($all.Count) מכשירים, פעילים עכשיו: $($d.Count)${net}:" } elseif ($open -ge 2) { "⚠ פתוח עכשיו ב-$open מכשירים${net}:" } else { "ℹ בקוד הזה יש $($all.Count) מכשירים (פעילים עכשיו: $($d.Count))${net}:" })
+    $lines = @(); foreach ($x in $d) { $lines += (& $line $x ($(if ($x.playing) { '🟢 צופה עכשיו' } else { '🟢 פתוח, לא צופה' }) + (& $rl $x) + " (עודכן לפני $(& $ago $x.at))")) }
+    foreach ($x in $idle) { $lines += (& $line $x ($(if ($x.closed) { '⚪ NOVA סגורה' } else { '⚪ לא פעיל' }) + (& $rl $x) + " (נראה לפני $(& $ago $x.at))")) }
+    return $head + "`n" + ($lines -join "`n")
 }
 function Local-Digits($s) { $d = $s -replace '\D', ''; if ($d.StartsWith('972')) { $d = '0' + $d.Substring(3) }; return $d }
 function Matches($u, $q) {
@@ -710,6 +741,8 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
             <TextBlock x:Name="CInfo" Foreground="#A8A8B8" FontSize="14" Margin="0,4,0,0" TextWrapping="Wrap"/>
             <TextBlock x:Name="CShared" Foreground="#F5A35B" FontWeight="Bold" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
             <Button x:Name="BShared" Content="שלח הודעה: הקוד בשימוש ביותר ממכשיר אחד" Style="{StaticResource Gold}" HorizontalAlignment="Left" Visibility="Collapsed"/>
+            <Button x:Name="BDevRules" Content="✅ אשר / ⛔ חסום מכשיר" Style="{StaticResource Gold}" HorizontalAlignment="Left" Visibility="Collapsed"/>
+            <Button x:Name="BDevCopy" Content="📋 העתק פרטי מכשיר" Style="{StaticResource Gold}" HorizontalAlignment="Left" Visibility="Collapsed"/>
             <Border Background="#121620" CornerRadius="14" Padding="16,12" Margin="0,12,0,0">
               <StackPanel>
                 <TextBlock Text="מסע ההתקנה" Foreground="#F5C76B" FontWeight="Bold" Margin="0,0,0,6"/>
@@ -839,7 +872,7 @@ function Refresh-UI {
         $t = "עומס על הספק עכשיו: $on $(if ($on -eq 1) { 'חיבור' } else { 'חיבורים' })"; if ($max -gt 0) { $t += " מתוך $max ($pct%)" }
         $ui.Load.Text = $t; $ui.Load.Foreground = Brush $(if ($pct -ge 90) { $Red } elseif ($pct -ge 60) { $Orange } else { $Green }); $ui.Load.Visibility = 'Visible'
     } else { $ui.Load.Visibility = 'Collapsed' }
-    $sh = @($all | Where-Object { @($script:devices[$_.id] | Where-Object { $_ }).Count -gt 1 }).Count
+    $sh = @($all | Where-Object { -not (Is-Admin $_) -and @($script:devices[$_.id] | Where-Object { $_ -and -not $_.rule }).Count -gt 1 }).Count
     if ($sh) { $ui.SharedAll.Text = "⚠ $sh $(if ($sh -eq 1) { 'קוד פתוח' } else { 'קודים פתוחים' }) ביותר ממכשיר אחד כרגע"; $ui.SharedAll.Visibility = 'Visible' } else { $ui.SharedAll.Visibility = 'Collapsed' }
     $ga = @($script:msgs) | Where-Object { $_.all } | Select-Object -First 1   # S-158
     if ($ga) { $ui.MsgAll.Text = '✉ הודעה אחרונה לכולם: ' + (Msg-Counts $ga); $ui.MsgAll.Visibility = 'Visible' } else { $ui.MsgAll.Visibility = 'Collapsed' }
@@ -893,11 +926,11 @@ function Show-Card {
     $info = @(); if ($u.phone) { $info += "טלפון: $($u.phone)" }; if ($u.mail) { $info += "מייל: $($u.mail)" }
     if (-not $adm) { $info += $(if ($u.x -gt 0) { "תוקף החשבון: עד $(Day $u.x)" } else { 'תוקף החשבון: ללא הגבלה' }) }
     $devs = @($script:devices[$u.id] | Where-Object { $_ })
-    if ($devs.Count -eq 1) { $info += "פתוח עכשיו ב: $($devs[0].model)$(if ($devs[0].playing) { ' · צופה' } else { '' })$(if ($devs[0].lite) { ' · מצב קל' } else { '' })" }   # S-179
+    if ($devs.Count -eq 1) { $info += "פתוח עכשיו ב: $($devs[0].model)$(if ($devs[0].playing) { ' · צופה' } else { ' · לא צופה' })$(if ($devs[0].lite) { ' · מצב קל' } else { '' })" }   # S-179
     $det = @(); foreach ($dv in $devs) { $det += @(Dev-Detail $dv ($devs.Count -gt 1)) }   # S-308
     $ui.CInfo.Text = ($info -join ' · ') + $(if ($det.Count) { "`n" + ($det -join "`n") } else { '' })
     $sn = Shared-Note $u
-    $ui.CShared.Text = $sn; $ui.CShared.Visibility = $(if ($sn) { 'Visible' } else { 'Collapsed' }); $ui.BShared.Visibility = $ui.CShared.Visibility
+    $ui.CShared.Text = $sn; $ui.CShared.Visibility = $(if ($sn) { 'Visible' } else { 'Collapsed' }); $ui.BShared.Visibility = $(if ($sn -and -not (Is-Admin $u) -and @($devs | Where-Object { -not $_.rule }).Count -gt 1) { 'Visible' } else { 'Collapsed' }); $ui.BDevCopy.Visibility = $(if ($devs.Count) { 'Visible' } else { 'Collapsed' }); $ui.BDevRules.Visibility = $(if ($devs.Count -gt 1 -and -not (Is-Admin $u)) { 'Visible' } else { 'Collapsed' })
     $ui.CSteps.Children.Clear()
     $i = Journey $u
     Step $true "הקוד נוצר · $($u.date)"
@@ -927,7 +960,7 @@ function Show-Card {
     $ui.BOff.Visibility = $(if (-not $adm -and $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BOn.Visibility = $(if (-not $adm -and -not $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BDel.Visibility = $ui.BOn.Visibility
-    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BRemind', 'BExpiry', 'BScreens') { $ui[$b].IsEnabled = -not $script:busy }
+    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BDevCopy', 'BDevRules', 'BRemind', 'BExpiry', 'BScreens') { $ui[$b].IsEnabled = -not $script:busy }
 }
 
 # ── actions (AdminModel.kt) ──────────────────────────────────────────────────
@@ -1027,6 +1060,29 @@ function Pick-Screens($u) {
     $k = [int]$d.result; $id = $u.id; $nm = $u.name
     Work { Change { param($L) $x = Find $L.users $id; if ($x.PSObject.Properties['k']) { $x.k = $(if ($k -gt 1) { $k } else { 0 }) } else { $x | Add-Member -NotePropertyName k -NotePropertyValue $(if ($k -gt 1) { $k } else { 0 }) }; $x.mod = Now-Ms } } $(if ($k -gt 1) { "${nm}: עד $k מסכים בו-זמנית." } else { "${nm}: מסך אחד בלבד." })
 }
+# S-391 (Roni, 2026-11-14): approve / block one device that is open on a code. The relay keeps the rule (/rule/<code tag>); a blocked device gets no stream.
+function Rule-Post($u, $dv, $rule) { return (Post-One ($RelayHost + 'rule/' + (Code-Tag (Normalize $u.pretty))) ("$rule|" + [string]$dv.dev)) }
+function Apply-Rule($i, $rule, $dlg) {
+    $dv = @($script:ruleDevs)[$i]; if (-not $dv) { return }
+    if (Rule-Post $script:ruleUser $dv $rule) { Say $(switch ($rule) { 'ok' { 'המכשיר אושר. ההתראה עליו לא תחזור.' } 'block' { 'המכשיר נחסם. הצפייה בו נעצרת.' } default { 'הכלל בוטל.' } }) } else { Say 'השליחה נכשלה. כדאי לבדוק את האינטרנט ולנסות שוב.' }
+    Close-Dlg $dlg $null
+}
+function Show-DevRules($u) {
+    $ds = @($script:devices[$u.id] | Where-Object { $_ }); if ($ds.Count -lt 1) { return }
+    $script:ruleUser = $u; $script:ruleDevs = $ds
+    $d = New-Dialog "מכשירים על הקוד של $($u.name)"
+    for ($i = 0; $i -lt $ds.Count; $i++) {
+        $dv = $ds[$i]; $id4 = ([string]$dv.dev); $id4 = $id4.Substring(0, [Math]::Min(4, $id4.Length))
+        $st = ''; if ($dv.rule -eq 'ok') { $st = ' · ✅ מאושר' } elseif ($dv.rule -eq 'block') { $st = ' · ⛔ חסום' }
+        [void](Add-Text $d ($(if ($dv.tv) { '📺 ' } else { '📱 ' }) + $(if ($dv.model) { $dv.model } else { 'מכשיר' }) + " · $id4" + $st) $null)
+        if (-not $dv.rule) {
+            [void](Add-Btn $d 'אשר' $true ([scriptblock]::Create("param(`$x) Apply-Rule $i 'ok' `$x")))
+            [void](Add-Btn $d 'חסום' $false ([scriptblock]::Create("param(`$x) Apply-Rule $i 'block' `$x")))
+        } else { [void](Add-Btn $d 'בטל' $false ([scriptblock]::Create("param(`$x) Apply-Rule $i 'clear' `$x"))) }
+    }
+    [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
+    [void]$d.win.ShowDialog()
+}
 function Show-Reveal($u) {
     $rc = Reveal-Code $u.pretty
     $msg = "SUPER NOVA: קוד להצגת פרטים בטלוויזיה: $rc`nבטלוויזיה: הגדרות > חשבון > הצג פרטים, ולהקיש את הקוד. הקוד בתוקף כ-10 דקות."
@@ -1044,6 +1100,11 @@ function Show-MsgLog($uid) {
     $names = @{}; foreach ($u in $script:users) { $names[$u.id] = $u.name }
     $list = @(@($script:msgs) | Where-Object { -not $uid -or $_.to -contains $uid })
     $d = New-Dialog $(if ($uid) { "ההודעות של $($names[$uid])" } else { 'יומן הודעות' })
+    if ($list.Count) {   # S-167 / S-393: delete every message shown here, button on top (Roni 2026-11-14)
+        $d.all = $list
+        [void](Add-Btn $d "🗑 מחק הכול ($($list.Count))" $false { param($x)
+            if (Confirm 'מחיקת כל ההודעות' "למחוק $(@($x.all).Count) הודעות מהיומן?`nהודעות שעוד לא הופיעו על המסך גם לא יופיעו.") { Delete-Msgs $x.all; Close-Dlg $x $null } } $Red)
+    }
     $sv = New-Object Windows.Controls.ScrollViewer; $sv.MaxHeight = 480; $sv.VerticalScrollBarVisibility = 'Auto'
     $box = New-Object Windows.Controls.StackPanel; $sv.Content = $box; [void]$d.panel.Children.Add($sv)
     function T($text, $color, $size, $bold) { $t = New-Object Windows.Controls.TextBlock; $t.Text = $text; $t.TextWrapping = 'Wrap'; $t.FontSize = $size; $t.Foreground = Brush $color; if ($bold) { $t.FontWeight = [Windows.FontWeights]::Bold }; return $t }
@@ -1071,11 +1132,6 @@ function Show-MsgLog($uid) {
         [void]$box.Children.Add($b)
     }
     [void](Add-Text $d 'אישור מגיע רק מטלוויזיות עם NOVA מעודכנת. הודעות מלפני העדכון לא ביומן.' $null)
-    if ($list.Count) {   # S-167: delete every message shown here
-        $d.all = $list
-        [void](Add-Btn $d "🗑 מחק הכול ($($list.Count))" $false { param($x)
-            if (Confirm 'מחיקת כל ההודעות' "למחוק $(@($x.all).Count) הודעות מהיומן?`nהודעות שעוד לא הופיעו על המסך גם לא יופיעו.") { Delete-Msgs $x.all; Close-Dlg $x $null } } $Red)
-    }
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
     [void]$d.win.ShowDialog()
     if ($d.reopen) { Show-MsgLog $uid }   # S-166: after a delete
@@ -1095,6 +1151,7 @@ function Show-Crashes {
     $d = New-Dialog 'יומני קריסה מהטלוויזיות'
     if (@($script:crash.logs).Count -eq 0) { [void](Add-Text $d 'אין יומני קריסה.' $null) }
     else {
+        [void](Add-Btn $d '🗑 נקה את כל היומנים' $false { param($x) $script:crash.logs = @(); Save-Crash; Close-Dlg $x $null } $Red)
         $t = New-Object Windows.Controls.TextBox; $t.IsReadOnly = $true; $t.TextWrapping = 'Wrap'; $t.VerticalScrollBarVisibility = 'Auto'; $t.Height = 420; $t.Width = 580
         $t.FlowDirection = 'LeftToRight'; $t.FontFamily = 'Consolas'; $t.FontSize = 12; $t.Background = Brush '#0B0D12'; $t.Foreground = Brush '#DDDDDD'
         $t.Text = ((@($script:crash.logs) | ForEach-Object { (When $_.t) + "`r`n" + $_.x }) -join "`r`n`r`n──────────`r`n`r`n")
@@ -1111,7 +1168,6 @@ function Show-Crashes {
             } $Green
             $b.Tag.v = @{ t = $l.t; btn = $b }
         }
-        [void](Add-Btn $d 'נקה את כל היומנים' $false { param($x) $script:crash.logs = @(); Save-Crash; Close-Dlg $x $null } $Red)
     }
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
     $script:crash.read = [int64](@($script:crash.logs | ForEach-Object { [int64]$_.t }) + @(0) | Measure-Object -Maximum).Maximum; Save-Crash
@@ -1167,6 +1223,8 @@ $ui.BRemind.Add_Click({
     if ($u.phone) { Send-Whats $u 'תזכורת: ' } elseif ($u.mail) { Send-Mail $u 'תזכורת: ' } else { Send-Whats $u 'תזכורת: ' }
 })
 $ui.BShared.Add_Click({ $u = Cur; if ($u) { Send-Message @($u) $SharedText } })
+$ui.BDevRules.Add_Click({ $u = Cur; if ($u) { Show-DevRules $u } })
+$ui.BDevCopy.Add_Click({ $u = Cur; if ($u) { $ds = @($script:devices[$u.id] | Where-Object { $_ }); if ($ds.Count) { [Windows.Clipboard]::SetText((($ds | ForEach-Object { (@("$(if ($_.tv) { '📺' } else { '📱' }) $(if ($_.model) { $_.model } else { 'מכשיר' }) · מזהה $(([string]$_.dev).Substring(0, [Math]::Min(4, ([string]$_.dev).Length)))$(if ($_.playing) { ' · צופה' } else { '' })") + @(Dev-Detail $_ $false)) -join "`n" }) -join "`n`n")); Say 'פרטי המכשירים הועתקו. אפשר להדביק ל-Claude.' } } })
 $ui.BMsg.Add_Click({ $u = Cur; if (-not $u) { return }; $t = Ask "הודעה למסך של $($u.name)" 'ההודעה תופיע על המסך שלו (טלוויזיה, טלפון, טאבלט).' '' $false $true 'שלח'; if ($t) { Send-Message @($u) $t } })
 $ui.BRestart.Add_Click({
     $u = Cur; if (-not $u) { return }
@@ -1284,9 +1342,20 @@ function Check-SelfUpdate([bool]$quiet = $false, [bool]$manual = $false) {
         param($text)
         if (-not $text) { if ($manual) { Say 'אין חיבור לבדיקת עדכון. נסה שוב.' }; return }
         try { $a = ($text | ConvertFrom-Json).adminPc } catch { return }
-        if (-not $a -or [int]$a.version -le $PcVersion -or -not $a.url) { if ($manual) { Say "אין גרסה חדשה. יש לך גרסה $PcVersion." }; return }
+        if (-not $a -or [int]$a.version -le $PcVersion -or -not $a.url) {
+            if ($manual) { $d0 = New-Dialog 'אין עדכון'; [void](Add-Text $d0 "הגרסה שלך היא העדכנית ביותר: $PcVersion" $null); [void](Add-Btn $d0 'סגור' $true { param($x) Close-Dlg $x $null }); [void]$d0.win.ShowDialog() }   # S-396: a card, not a status line
+            return
+        }
         # S-164: from the timer, never in the middle of work: no open dialog, no sync, a minute without typing / clicking
         if ($quiet -and ($script:busy -or $win.OwnedWindows.Count -gt 0 -or ((Get-Date) - $script:lastInput).TotalSeconds -lt 60)) { return }
+        # S-396 (Roni 2026-11-14): a card with the new version number, "עדכן עכשיו" / "אחר כך"; nothing updates by itself any more. "אחר כך" skips that version until the next start.
+        if (-not $manual -and $script:updSkipped -eq [int]$a.version) { return }
+        $d1 = New-Dialog 'יש עדכון ל-NOVA Admin'
+        [void](Add-Text $d1 "גרסה חדשה: $($a.version)`nהגרסה שלך: $PcVersion`nהעדכון לוקח כמה שניות, המשתמשים וההגדרות נשמרים." $null)
+        [void](Add-Btn $d1 'עדכן עכשיו' $true { param($x) Close-Dlg $x 'now' })
+        [void](Add-Btn $d1 'אחר כך' $false { param($x) Close-Dlg $x 'later' })
+        [void]$d1.win.ShowDialog()
+        if ($d1.result -ne 'now') { $script:updSkipped = [int]$a.version; return }
         try {
             $bytes = $script:http.GetByteArrayAsync([string]$a.url).GetAwaiter().GetResult()
             $body = $utf8.GetString($bytes)
