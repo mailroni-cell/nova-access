@@ -37,7 +37,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 28   # S-401: button '⏹ סגור את NOVA אצלו' (close command, no reopen); was 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -777,6 +777,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
               <Button x:Name="BCopy" Content="העתק הודעה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BMsg" Content="✉ הודעה למסך" Style="{StaticResource Ghost}"/>
               <Button x:Name="BRestart" Content="🔄 אתחול NOVA מרחוק" Style="{StaticResource Ghost}"/>
+              <Button x:Name="BClose" Content="⏹ סגור את NOVA אצלו" Style="{StaticResource Ghost}"/>
               <Button x:Name="BRename" Content="שנה שם תצוגה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BLogin" Content="שנה משתמש וסיסמה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BExpiry" Content="📅 תוקף החשבון" Style="{StaticResource Ghost}"/>
@@ -973,7 +974,7 @@ function Show-Card {
     $ui.BOff.Visibility = $(if (-not $adm -and $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BOn.Visibility = $(if (-not $adm -and -not $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BDel.Visibility = $ui.BOn.Visibility
-    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BDevCopy', 'BDevRules', 'BRemind', 'BExpiry', 'BScreens') { $ui[$b].IsEnabled = -not $script:busy }
+    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BClose', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BDevCopy', 'BDevRules', 'BRemind', 'BExpiry', 'BScreens') { $ui[$b].IsEnabled = -not $script:busy }
 }
 
 # ── actions (AdminModel.kt) ──────────────────────────────────────────────────
@@ -1265,6 +1266,11 @@ $ui.BRestart.Add_Click({
     $u = Cur; if (-not $u) { return }
     if (-not (Confirm "להפעיל מחדש את NOVA אצל $($u.name)?" 'NOVA תיסגר ותיפתח מחדש תוך דקה, אם היא פתוחה עכשיו. אם היא סגורה - לא יקרה כלום.')) { return }
     if (Ntfy-Post (Cmd-Topic (Normalize $u.pretty)) 'restart') { Say "נשלח. NOVA של $($u.name) תופעל מחדש תוך דקה (אם היא פתוחה)." } else { Say 'השליחה נכשלה. כדאי לבדוק את האינטרנט ולנסות שוב.' }
+})
+$ui.BClose.Add_Click({
+    $u = Cur; if (-not $u) { return }
+    if (-not (Confirm "לסגור את NOVA אצל $($u.name)?" 'NOVA תיסגר לגמרי אצלו תוך דקה ולא תיפתח מחדש (גם הנגן ברקע ייעצר). אם היא סגורה - לא יקרה כלום.')) { return }
+    if (Ntfy-Post (Cmd-Topic (Normalize $u.pretty)) 'close') { Say "נשלח. NOVA של $($u.name) תיסגר תוך דקה (אם היא פתוחה)." } else { Say 'השליחה נכשלה. כדאי לבדוק את האינטרנט ולנסות שוב.' }
 })
 $ui.BRename.Add_Click({
     $u = Cur; if (-not $u) { return }
