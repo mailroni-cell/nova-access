@@ -1,4 +1,5 @@
-﻿# Updated S-400 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): ROOT CAUSE of "device not linked to a code": Admin-Key did $script:salt = $salt, and PowerShell variables are case-insensitive, so it overwrote the tag SALT ($Salt) with the 16-byte admin salt after unlock; every Code-Tag / Cmd-Topic / rule / restart then used the wrong salt and no relay device matched any user. Renamed the constant to $NovaSalt and dropped the stray assignment; PcVersion stays 26.
+﻿# Updated S-401 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): status bar lists every open device with its user (code) and watching / open; PcVersion 27; a deleted / renamed user never lends its old name to a device.
+# Updated S-400 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): ROOT CAUSE of "device not linked to a code": Admin-Key did $script:salt = $salt, and PowerShell variables are case-insensitive, so it overwrote the tag SALT ($Salt) with the 16-byte admin salt after unlock; every Code-Tag / Cmd-Topic / rule / restart then used the wrong salt and no relay device matched any user. Renamed the constant to $NovaSalt and dropped the stray assignment; PcVersion stays 26.
 # Updated S-391 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): approve / block per device (button on the code card); the shared alert counts only devices without a rule.
 # Updated S-390 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): several devices on one code listed one per line (model, internal IP, device id) with a same-network note; PcVersion 19.
 # Updated S-386 2026-11-12 (Claude Sonnet 5.5, thread "מגבר חדש באנדרואיד"): UTF-8 BOM restored, PcVersion 18.
@@ -36,7 +37,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 26   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -413,7 +414,15 @@ function Show-Conn {
         $a = if ($script:relayOk -eq $false) { 'אין חיבור לשרת הנוכחות, מוצג המצב האחרון (' + (& $t $script:relayAt) + ')' } else { 'נוכחות ' + (& $t $script:relayAt) }
         $b = if ($script:syncOk -eq $false) { 'קובץ משותף לא נקרא (' + (& $t $script:syncAt) + ')' } else { 'רשימה משותפת ' + (& $t $script:syncAt) }
         $oph = $(if (@($script:orphans).Count) { ' · ⚠ פתוח בקוד שלא ברשימה: ' + ((@($script:orphans) | Select-Object -First 3) -join ', ') } else { '' })
-        $ui.SyncState.Text = "● $a · $b$oph"
+        $onn = ''
+        try {
+            $nm = @{}; foreach ($u in @($script:users | Where-Object { -not $_.del })) { $nm[(Code-Tag (Normalize $u.pretty))] = $u.name }   # S-401: which code each open device is on
+            foreach ($x in @($script:allRelay | Where-Object { $_.online } | Select-Object -First 4)) {
+                $wn = $(if ($nm.ContainsKey($x.tag)) { $nm[$x.tag] } else { 'קוד לא ברשימה' })
+                $onn += "`n" + $(if ($x.playing) { '🟢 ' } else { '🟡 ' }) + "$wn ← " + $(if ($x.model) { $x.model } else { 'מכשיר' }) + " (" + $(if ($x.playing) { 'צופה' } else { 'פתוח' }) + ")"
+            }
+        } catch { }
+        $ui.SyncState.Text = "● $a · $b$oph$onn"
         $ui.SyncState.Foreground = [Windows.Media.BrushConverter]::new().ConvertFromString($col)
     } catch { }
 }
@@ -1153,7 +1162,7 @@ function Delete-Msgs($gs) {
 }
 # S-399 (Roni 2026-11-14: "a real report from every machine NOVA is installed on, in real time"): every device the relay knows, whatever its code. Updates every time it is opened; the list itself refreshes every 30 s.
 function Show-AllDevices {
-    $names = @{}; foreach ($u in $script:users) { $names[(Code-Tag (Normalize $u.pretty))] = $u.name }
+    $names = @{}; foreach ($u in @($script:users | Where-Object { -not $_.del })) { $names[(Code-Tag (Normalize $u.pretty))] = $u.name }
     $nowS = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     $list = @($script:allRelay)
     $lines = @()
