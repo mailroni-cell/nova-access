@@ -1,4 +1,5 @@
-﻿# Updated S-391 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): approve / block per device (button on the code card); the shared alert counts only devices without a rule.
+﻿# Updated S-400 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): ROOT CAUSE of "device not linked to a code": Admin-Key did $script:salt = $salt, and PowerShell variables are case-insensitive, so it overwrote the tag SALT ($Salt) with the 16-byte admin salt after unlock; every Code-Tag / Cmd-Topic / rule / restart then used the wrong salt and no relay device matched any user. Renamed the constant to $NovaSalt and dropped the stray assignment; PcVersion stays 26.
+# Updated S-391 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): approve / block per device (button on the code card); the shared alert counts only devices without a rule.
 # Updated S-390 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): several devices on one code listed one per line (model, internal IP, device id) with a same-network note; PcVersion 19.
 # Updated S-386 2026-11-12 (Claude Sonnet 5.5, thread "מגבר חדש באנדרואיד"): UTF-8 BOM restored, PcVersion 18.
 # Updated S-348 2026-11-08 (Claude Sonnet 5.5, thread "סגור שיחה קודמת, קרא handoff והמשך"): IP and model of every open device on each user row; PcVersion 16.
@@ -35,7 +36,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 25   # S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 26   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -46,7 +47,7 @@ $crashFile = Join-Path $root 'crashes.json'
 $errFile   = Join-Path $root 'admin_error.txt'
 $Repo      = 'mailroni-cell/nova-access'
 $DefaultLink = 'https://github.com/mailroni-cell/nova-access/raw/main/NOVA.apk'
-$Salt      = 'bba7c8a8ffec56841421c28c'   # same as NovaRemote.kt (TV + phone)
+$NovaSalt  = 'bba7c8a8ffec56841421c28c'   # same as NovaRemote.kt (TV + phone)
 $utf8      = New-Object Text.UTF8Encoding($false)
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 
@@ -139,12 +140,12 @@ function Reseal($u, $set) {
 
 # ── ntfy.sh (NovaRemote.kt) ──────────────────────────────────────────────────
 function H24($s) { return (Sha $s).Substring(0, 24) }
-function Cmd-Topic($code) { return 'nova-c' + (H24 "cmd|$Salt|$code") }
-function Code-Tag($code) { return (H24 "tag|$Salt|$code").Substring(0, 12) }
-$PresenceTopic = 'nova-p' + (H24 "presence|$Salt")
+function Cmd-Topic($code) { return 'nova-c' + (H24 "cmd|$NovaSalt|$code") }
+function Code-Tag($code) { return (H24 "tag|$NovaSalt|$code").Substring(0, 12) }
+$PresenceTopic = 'nova-p' + (H24 "presence|$NovaSalt")
 $PresenceWindow = 480   # S-269: NOVA reports on a change + every 5 minutes (was 20 min / 1500 s); "x" = closed
-$CrashTopic    = 'nova-x' + (H24 "crash|$Salt")
-$ReceiptTopic  = 'nova-r' + (H24 "receipt|$Salt")   # S-158: r1|<code tag>|<message id>|<s / c>|<device>|<model>
+$CrashTopic    = 'nova-x' + (H24 "crash|$NovaSalt")
+$ReceiptTopic  = 'nova-r' + (H24 "receipt|$NovaSalt")   # S-158: r1|<code tag>|<message id>|<s / c>|<device>|<model>
 # S-160 2026-10-29 (Claude Opus 5.5, thread "קרא md שנמשיך מאותה נקודה"): Roni's own relay on Cloudflare (tools/nova-relay/worker.js), same API as ntfy.sh.
 $RelayHost = 'https://nova-relay.mail-roni.workers.dev/'
 function Post-One($url, $body) {
@@ -213,7 +214,7 @@ $script:users = @(); $script:msgs = @(); $script:cfg = New-Cfg $null; $script:sa
 function Admin-Key([byte[]]$salt) {
     $pw = Get-Sync
     $tag = $pw + '|' + [Convert]::ToBase64String($salt)
-    if ($script:akeyFor -ne $tag) { $script:akey = Pbkdf2 $pw $salt 100000; $script:akeyFor = $tag; $script:salt = $salt }
+    if ($script:akeyFor -ne $tag) { $script:akey = Pbkdf2 $pw $salt 100000; $script:akeyFor = $tag }
     return $script:akey
 }
 function Load-Remote {
@@ -339,7 +340,7 @@ function Inst-Seen($id, $reports) {
 }
 
 # ── live state: server status, devices (presence), crash logs ────────────────
-$script:live = @{}; $script:devices = @{}; $script:idleDevs = @{}; $script:orphans = @(); $script:admins = @{}; $script:grants = @{}
+$script:live = @{}; $script:devices = @{}; $script:idleDevs = @{}; $script:allRelay = @(); $script:orphans = @(); $script:admins = @{}; $script:grants = @{}
 $script:novaLatest = 0; $script:historyRead = $false
 $script:crash = [pscustomobject]@{ since = ((Now-S) - 12 * 3600); read = 0; logs = @() }
 try { $c = (Read-Text $crashFile) | ConvertFrom-Json; if ($c) { $script:crash = $c; $script:crash.logs = @($c.logs | Where-Object { $_ }) } } catch { }
@@ -440,8 +441,9 @@ function Check-State {
         try {
             $j = $text | ConvertFrom-Json
             if ($null -eq $j.now) { $script:stateOk = $false; return }
-            $byTag = @{}; $idleTag = @{}
+            $byTag = @{}; $idleTag = @{}; $allRel = @()
             foreach ($r in @($j.devices)) {
+                $allRel += [pscustomobject]@{ tag = [string]$r.tag; dev = [string]$r.dev; tv = [bool]$r.tv; playing = [bool]$r.playing; online = [bool]$r.online; closed = [bool]$r.closed; model = [string]$r.model; at = [int64]$r.seen; ver = [int]$r.ver; info = [string]$r.info; ip = [string]$r.ip }   # S-399
                 if (-not $r.online) {   # S-394: not open now, kept for the "devices on this code" note
                     $di0 = @{}; foreach ($kv in ([string]$r.info).Split(';')) { $kk, $vv = $kv.Split('=', 2); if ($kk) { $di0[$kk] = $vv } }
                     $s0 = [pscustomobject]@{ dev = [string]$r.dev; tv = [bool]$r.tv; closed = [bool]$r.closed; model = [string]$r.model; at = [int64]$r.seen; info = $di0; rule = [string]$r.rule }
@@ -470,6 +472,7 @@ function Check-State {
                 if ($idleTag.ContainsKey($tg1)) { $openDevs = @($dev[$u.id] | ForEach-Object { $_.dev }); $iv = @($idleTag[$tg1] | Where-Object { $openDevs -notcontains $_.dev } | Sort-Object -Property at -Descending); if ($iv.Count) { $idleMap[$u.id] = $iv } }
             }
             $script:idleDevs = $idleMap
+            $script:allRelay = @($allRel | Sort-Object -Property @{ Expression = { $_.playing -and $_.online }; Descending = $true }, @{ Expression = { $_.online }; Descending = $true }, @{ Expression = { $_.at }; Descending = $true })
             $script:devices = $dev; $script:stateOk = $true
         } catch { $script:stateOk = $false }
     } $null
@@ -684,6 +687,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
           <Button x:Name="BLog" Content="📜 יומן הודעות" Style="{StaticResource Ghost}"/>
           <Button x:Name="BCrash" Content="יומני קריסה" Style="{StaticResource Ghost}"/>
           <Button x:Name="BRefresh" Content="⟳ רענן" Style="{StaticResource Ghost}"/>
+          <Button x:Name="BAllDev" Content="📡 כל המכשירים" Style="{StaticResource Ghost}"/>
           <Button x:Name="BUpdate" Content="⬆ בדוק עדכון" Style="{StaticResource Ghost}"/>
           <Button x:Name="BSettings" Content="⚙ הגדרות" Style="{StaticResource Ghost}"/>
         </StackPanel>
@@ -1147,6 +1151,27 @@ function Delete-Msgs($gs) {
         foreach ($x in @($L.users)) { if ($to -contains $x.id) { $o = Open-Entry $x; if ($o -and $ids -contains [string](Prop $o 'mi' '')) { $x.d = Reseal $x @{ m = ''; mi = '' }; $x.mod = Now-Ms } } }
         $L.msgs = @(@($L.msgs) | Where-Object { $ids -notcontains [string]$_.id }) } } $ok
 }
+# S-399 (Roni 2026-11-14: "a real report from every machine NOVA is installed on, in real time"): every device the relay knows, whatever its code. Updates every time it is opened; the list itself refreshes every 30 s.
+function Show-AllDevices {
+    $names = @{}; foreach ($u in $script:users) { $names[(Code-Tag (Normalize $u.pretty))] = $u.name }
+    $nowS = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $list = @($script:allRelay)
+    $lines = @()
+    foreach ($x in $list) {
+        $q = [Math]::Max(0, $nowS - $x.at); $ago = $(if ($q -lt 90) { "$q שנ'" } elseif ($q -lt 3600) { "$([int][Math]::Floor($q / 60)) דק'" } else { "$([int][Math]::Floor($q / 3600)) שע'" })
+        $st = $(if ($x.online -and $x.playing) { '🟢 צופה עכשיו' } elseif ($x.online) { '🟡 פתוח, לא צופה' } elseif ($x.closed) { '⚪ NOVA סגורה' } else { '⚪ לא מדווח' })
+        $who = $(if ($names.ContainsKey($x.tag)) { $names[$x.tag] } else { 'לא משויך לקוד ברשימה' })
+        $li = ''; foreach ($kv in $x.info.Split(';')) { if ($kv.StartsWith('li=')) { $li = " · פנימי $($kv.Substring(3))" } }
+        $lines += ($(if ($x.tv) { '📺 ' } else { '📱 ' }) + $(if ($x.model) { $x.model } else { 'מכשיר' }) + " · $who`n   $st · עודכן לפני $ago · גרסה $($x.ver)$li" + $(if ($x.ip) { " · חיצוני $($x.ip)" } else { '' }))
+    }
+    $d = New-Dialog "כל המכשירים בזמן אמת ($(@($list | Where-Object { $_.online }).Count) פעילים מתוך $($list.Count))"
+    $t = New-Object Windows.Controls.TextBox; $t.IsReadOnly = $true; $t.TextWrapping = 'Wrap'; $t.VerticalScrollBarVisibility = 'Auto'; $t.Height = 460; $t.Width = 640
+    $t.FontSize = 13; $t.Background = Brush '#0B0D12'; $t.Foreground = Brush '#EDEDF2'
+    $t.Text = $(if ($lines.Count) { $lines -join "`r`n`r`n" } else { 'אין דיווחים מהשרת.' })
+    [void]$d.panel.Children.Add($t)
+    [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
+    [void]$d.win.ShowDialog()
+}
 function Show-Crashes {
     $d = New-Dialog 'יומני קריסה מהטלוויזיות'
     if (@($script:crash.logs).Count -eq 0) { [void](Add-Text $d 'אין יומני קריסה.' $null) }
@@ -1213,6 +1238,7 @@ $ui.BLog.Add_Click({ Show-MsgLog $null })   # S-158
 $ui.BMsgLog.Add_Click({ $u = Cur; if ($u) { Show-MsgLog $u.id } })
 $ui.BRefresh.Add_Click({ Load-All })
 $ui.BSettings.Add_Click({ Show-Settings })
+$ui.BAllDev.Add_Click({ Show-AllDevices })   # S-399
 $ui.BUpdate.Add_Click({ Say 'בודק עדכון...'; Check-SelfUpdate $false $true })   # S-165
 $ui.BWhats.Add_Click({ $u = Cur; if ($u) { Send-Whats $u '' } })
 $ui.BMail.Add_Click({ $u = Cur; if ($u) { Send-Mail $u '' } })
