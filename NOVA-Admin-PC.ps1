@@ -1,4 +1,5 @@
-﻿# Updated S-401 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): status bar lists every open device with its user (code) and watching / open; PcVersion 27; a deleted / renamed user never lends its old name to a device.
+﻿# Updated S-470 2026-11-19 (Claude Sonnet 5.5, thread "NOVA YouTube + freeze"): crash logs button "השווה sid" (Favourites vs World per channel); PcVersion 29.
+# Updated S-401 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): status bar lists every open device with its user (code) and watching / open; PcVersion 27; a deleted / renamed user never lends its old name to a device.
 # Updated S-400 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): ROOT CAUSE of "device not linked to a code": Admin-Key did $script:salt = $salt, and PowerShell variables are case-insensitive, so it overwrote the tag SALT ($Salt) with the 16-byte admin salt after unlock; every Code-Tag / Cmd-Topic / rule / restart then used the wrong salt and no relay device matched any user. Renamed the constant to $NovaSalt and dropped the stray assignment; PcVersion stays 26.
 # Updated S-391 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): approve / block per device (button on the code card); the shared alert counts only devices without a rule.
 # Updated S-390 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): several devices on one code listed one per line (model, internal IP, device id) with a same-network note; PcVersion 19.
@@ -37,7 +38,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 28   # S-401: button '⏹ סגור את NOVA אצלו' (close command, no reopen); was 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 29   # S-470: button '🔎 השווה sid' in the crash logs (Favourites vs World); was 28   # S-401: button '⏹ סגור את NOVA אצלו' (close command, no reopen); was 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -1182,6 +1183,26 @@ function Show-AllDevices {
     [void](Add-Btn $d 'סגור' $false { param($x) Close-Dlg $x $null })
     [void]$d.win.ShowDialog()
 }
+# S-470 (Roni 2026-11-19, thread NOVA YouTube + freeze): per channel, stream ids (sid) seen in World channels ("all") against the other lists (Favourites); log context "<scope> n<count> i<idx> g<gen> sid<id>" (NOVA 463 and up).
+function Sid-Report {
+    $world = @{}; $other = @{}
+    foreach ($l in @($script:crash.logs)) {
+        $c = [regex]::Match([string]$l.x, 'channel (\d+)'); $m = [regex]::Match([string]$l.x, '(\S+) n\d+ i\d+ g\d+ sid(\d+)')
+        if (-not $c.Success -or -not $m.Success) { continue }
+        $n = [int]$c.Groups[1].Value; $tab = $(if ($m.Groups[1].Value -eq 'all') { $world } else { $other })
+        if (-not $tab.ContainsKey($n)) { $tab[$n] = @() }
+        if ($tab[$n] -notcontains $m.Groups[2].Value) { $tab[$n] += $m.Groups[2].Value }
+    }
+    $out = @()
+    foreach ($n in (@($world.Keys) + @($other.Keys) | Sort-Object -Unique)) {
+        $w = @($world[$n] | Sort-Object); $o = @($other[$n] | Sort-Object)
+        if (-not $w.Count -or -not $o.Count) { $out += @{ t = "⚪ ערוץ ${n}: רק ב$(if ($w.Count) { 'עולם' } else { 'מועדפים' }) (sid $((@($w) + @($o)) -join ',')), אין עם מה להשוות"; bad = $false } }
+        elseif (($w -join ',') -eq ($o -join ',')) { $out += @{ t = "🟢 ערוץ ${n}: אותו sid $($w -join ',')"; bad = $false } }
+        else { $out += @{ t = "🔴 ערוץ ${n}: מועדפים sid $($o -join ','), עולם sid $($w -join ','): זרמים שונים"; bad = $true } }
+    }
+    if (-not $out.Count) { $out = @(@{ t = 'אין עדיין יומנים עם sid (רק מגרסה 463 של NOVA).'; bad = $false }) }
+    return $out
+}
 function Show-Crashes {
     $d = New-Dialog 'יומני קריסה מהטלוויזיות'
     if (@($script:crash.logs).Count -eq 0) { [void](Add-Text $d 'אין יומני קריסה.' $null) }
@@ -1191,6 +1212,8 @@ function Show-Crashes {
         $t.FlowDirection = 'LeftToRight'; $t.FontFamily = 'Consolas'; $t.FontSize = 12; $t.Background = Brush '#0B0D12'; $t.Foreground = Brush '#DDDDDD'
         $t.Text = ((@($script:crash.logs) | ForEach-Object { (When $_.t) + "`r`n" + $_.x }) -join "`r`n`r`n──────────`r`n`r`n")
         [void]$d.panel.Children.Add($t); $d.t = $t
+        [void](Add-Btn $d '🔎 השווה sid: מועדפים מול עולם' $false { param($x) foreach ($r in (Sid-Report)) { [void](Add-Text $x $r.t $(if ($r.bad) { $Red } else { $null })) } })
+        [void](Add-Btn $d '📋 השווה sid והעתק ל-Claude' $false { param($x) [Windows.Clipboard]::SetText("NOVA sid מועדפים מול עולם:`r`n" + ((Sid-Report | ForEach-Object { $_.t }) -join "`r`n")); Say 'תוצאת ה-sid הועתקה. אפשר להדביק ל-Claude.' })
         [void](Add-Btn $d 'העתק הכול' $false { param($x) [Windows.Clipboard]::SetText($x.t.Text); Say 'היומנים הועתקו. אפשר להדביק ל-Claude.' })
         foreach ($l in @($script:crash.logs)) { # S-156: fixed - hide this log for good
             $b = Add-Btn $d ('✓ טופל - הסתר את היומן מ-' + (When $l.t)) $false {
