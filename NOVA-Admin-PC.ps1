@@ -1,4 +1,5 @@
 ﻿# Updated S-470 2026-11-19 (Claude Sonnet 5.5, thread "NOVA YouTube + freeze"): crash logs button "השווה sid" (Favourites vs World per channel); PcVersion 29.
+# Updated S-474 2026-11-20 (Claude Sonnet 5.5, thread "NOVA logs Technicolor"): every crash / BACK-timing / player-drop log is also written to access\crash_report.txt so Claude can read it directly; keeps 200 logs instead of 30; PcVersion 30.
 # Updated S-401 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): status bar lists every open device with its user (code) and watching / open; PcVersion 27; a deleted / renamed user never lends its old name to a device.
 # Updated S-400 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): ROOT CAUSE of "device not linked to a code": Admin-Key did $script:salt = $salt, and PowerShell variables are case-insensitive, so it overwrote the tag SALT ($Salt) with the 16-byte admin salt after unlock; every Code-Tag / Cmd-Topic / rule / restart then used the wrong salt and no relay device matched any user. Renamed the constant to $NovaSalt and dropped the stray assignment; PcVersion stays 26.
 # Updated S-391 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): approve / block per device (button on the code card); the shared alert counts only devices without a rule.
@@ -38,7 +39,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 29   # S-470: button '🔎 השווה sid' in the crash logs (Favourites vs World); was 28   # S-401: button '⏹ סגור את NOVA אצלו' (close command, no reopen); was 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 30   # S-470: button '🔎 השווה sid' in the crash logs (Favourites vs World); was 28   # S-401: button '⏹ סגור את NOVA אצלו' (close command, no reopen); was 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -346,7 +347,7 @@ $script:live = @{}; $script:devices = @{}; $script:idleDevs = @{}; $script:allRe
 $script:novaLatest = 0; $script:historyRead = $false
 $script:crash = [pscustomobject]@{ since = ((Now-S) - 12 * 3600); read = 0; logs = @() }
 try { $c = (Read-Text $crashFile) | ConvertFrom-Json; if ($c) { $script:crash = $c; $script:crash.logs = @($c.logs | Where-Object { $_ }) } } catch { }
-function Save-Crash { try { Write-Text $crashFile (ConvertTo-Json -InputObject $script:crash -Depth 4 -Compress) } catch { } }
+function Save-Crash { try { Write-Text $crashFile (ConvertTo-Json -InputObject $script:crash -Depth 4 -Compress) } catch { } try { Write-Text (Join-Path $root 'crash_report.txt') ((@($script:crash.logs) | ForEach-Object { (When $_.t) + "`r`n" + $_.x }) -join "`r`n`r`n----------`r`n`r`n") } catch { } } # S-474: full readable crash log for Claude
 if (-not ($script:crash.PSObject.Properties.Name -contains 'handled')) { $script:crash | Add-Member -NotePropertyName handled -NotePropertyValue @() -Force } # S-156
 $script:crash.handled = @($script:crash.handled | Where-Object { $_ })
 function Crash-Unread { return @($script:crash.logs | Where-Object { [int64]$_.t -gt [int64]$script:crash.read }).Count }
@@ -532,7 +533,7 @@ function Check-Crashes {
         foreach ($h in @($script:crash.handled)) { $seen['h' + [string]$h] = 1 } # S-156
         foreach ($m in (Ntfy-Parse $text)) { if (-not $seen.ContainsKey([string]$m.at + '|' + $m.body) -and -not $seen.ContainsKey('h' + [string]$m.at)) { $new += [pscustomobject]@{ t = $m.at; x = $m.body } } }
         if ($new.Count -eq 0) { return }
-        $script:crash.logs = @(($new + $old) | Sort-Object -Property t -Descending | Select-Object -First 30)
+        $script:crash.logs = @(($new + $old) | Sort-Object -Property t -Descending | Select-Object -First 200)
         $script:crash.since = ($new | Measure-Object -Property t -Maximum).Maximum
         Save-Crash
         try { $win.Title = "SUPER NOVA · ניהול · גרסה $PcVersion · ⚠ קריסה חדשה" } catch { }
