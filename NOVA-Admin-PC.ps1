@@ -1,4 +1,5 @@
-﻿# Updated S-470 2026-11-19 (Claude Sonnet 5.5, thread "NOVA YouTube + freeze"): crash logs button "השווה sid" (Favourites vs World per channel); PcVersion 29.
+﻿# Updated S-498 2026-11-24 (Claude Sonnet 5.5, thread "NOVA - בדיקת לוגים"): buttons "update NOVA" (one user) and "update everyone"; PcVersion 32.
+# Updated S-470 2026-11-19 (Claude Sonnet 5.5, thread "NOVA YouTube + freeze"): crash logs button "השווה sid" (Favourites vs World per channel); PcVersion 29.
 # Updated S-474 2026-11-20 (Claude Sonnet 5.5, thread "NOVA logs Technicolor"): every crash / BACK-timing / player-drop log is also written to access\crash_report.txt so Claude can read it directly; keeps 200 logs instead of 30; PcVersion 30.
 # Updated S-401 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): status bar lists every open device with its user (code) and watching / open; PcVersion 27; a deleted / renamed user never lends its old name to a device.
 # Updated S-400 2026-11-14 (Claude Sonnet 5.5, thread "בדוק מצב אחרון ופתח שיחה"): ROOT CAUSE of "device not linked to a code": Admin-Key did $script:salt = $salt, and PowerShell variables are case-insensitive, so it overwrote the tag SALT ($Salt) with the 16-byte admin salt after unlock; every Code-Tag / Cmd-Topic / rule / restart then used the wrong salt and no relay device matched any user. Renamed the constant to $NovaSalt and dropped the stray assignment; PcVersion stays 26.
@@ -40,7 +41,7 @@
 # Updated S-156 2026-10-29 (Claude Opus 5.5, thread "קרא md המשך"): "טופל" button per crash log, like the phone (crashes.json "handled").
 # Start: double-click C:\Projects\Streamer\NOVA-Admin.cmd (also makes a desktop shortcut "NOVA Admin").
 # ─────────────────────────────────────────────────────────────────────────────
-$PcVersion = 31   # S-480: crash_report.txt written at start; was 30   # S-470: button '🔎 השווה sid' in the crash logs (Favourites vs World); was 28   # S-401: button '⏹ סגור את NOVA אצלו' (close command, no reopen); was 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
+$PcVersion = 32   # S-480: crash_report.txt written at start; was 30   # S-470: button '🔎 השווה sid' in the crash logs (Favourites vs World); was 28   # S-401: button '⏹ סגור את NOVA אצלו' (close command, no reopen); was 27   # S-399: "📡 כל המכשירים" = every device the relay knows, live, mapped or not; was 25 in S-398: hotfix, idleDevs / orphans initialised (window failed to open: Cannot index into a null array); was 24 in S-397: status shows the age of an old report, 'not watching' written out; was 23 in S-396: update = a card (new version number, update now / later), no silent update; was 22 in S-395: admin code = no alert / no approve-block, every device with watching / open / idle / closed / blocked + last report age; was 21 in S-394: a code with 2+ devices lists every device seen in 24 h (active / watching / idle / closed); was 20 in S-393: delete-all buttons on top of the log dialogs; devices open on a code missing from the list shown in the status line; was 19 in S-390: several devices on one code listed one per line with model, internal IP, short id and same-network note; was 18 in S-386: UTF-8 BOM restored (without it Windows PowerShell read the Hebrew as ANSI and the window never opened since v16); was 17 in S-385: screens at once per code; was 16 in S-348: IP and model on every user row; was 15 in S-336 (relay /state)
 $ErrorActionPreference = 'Stop'
 $root      = 'C:\Projects\Streamer\access'
 $keyFile   = Join-Path $root 'github.key'
@@ -697,6 +698,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
           <Button x:Name="BNew" Content="+ משתמש חדש" Style="{StaticResource Gold}"/>
           <Button x:Name="BAll" Content="✉ הודעה לכל המשתמשים" Style="{StaticResource Ghost}"/>
+          <Button x:Name="BUpdateAll" Content="⬇ עדכן את NOVA אצל כולם" Style="{StaticResource Ghost}"/>
           <Button x:Name="BLog" Content="📜 יומן הודעות" Style="{StaticResource Ghost}"/>
           <Button x:Name="BCrash" Content="יומני קריסה" Style="{StaticResource Ghost}"/>
           <Button x:Name="BRefresh" Content="⟳ רענן" Style="{StaticResource Ghost}"/>
@@ -782,6 +784,7 @@ function Wa-Number($p) { $d = $p -replace '\D', ''; if ($d.StartsWith('0')) { $d
               <Button x:Name="BMsg" Content="✉ הודעה למסך" Style="{StaticResource Ghost}"/>
               <Button x:Name="BRestart" Content="🔄 אתחול NOVA מרחוק" Style="{StaticResource Ghost}"/>
               <Button x:Name="BClose" Content="⏹ סגור את NOVA אצלו" Style="{StaticResource Ghost}"/>
+              <Button x:Name="BUpdate" Content="⬇ עדכן את NOVA אצלו" Style="{StaticResource Ghost}"/>
               <Button x:Name="BRename" Content="שנה שם תצוגה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BLogin" Content="שנה משתמש וסיסמה" Style="{StaticResource Ghost}"/>
               <Button x:Name="BExpiry" Content="📅 תוקף החשבון" Style="{StaticResource Ghost}"/>
@@ -978,7 +981,7 @@ function Show-Card {
     $ui.BOff.Visibility = $(if (-not $adm -and $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BOn.Visibility = $(if (-not $adm -and -not $u.active) { 'Visible' } else { 'Collapsed' })
     $ui.BDel.Visibility = $ui.BOn.Visibility
-    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BClose', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BDevCopy', 'BDevRules', 'BRemind', 'BExpiry', 'BScreens') { $ui[$b].IsEnabled = -not $script:busy }
+    foreach ($b in 'BWhats', 'BMail', 'BCopy', 'BMsg', 'BRestart', 'BClose', 'BUpdate', 'BRename', 'BLogin', 'BReveal', 'BNewCode', 'BAdmin', 'BOff', 'BOn', 'BDel', 'BShared', 'BDevCopy', 'BDevRules', 'BRemind', 'BExpiry', 'BScreens') { $ui[$b].IsEnabled = -not $script:busy }
 }
 
 # ── actions (AdminModel.kt) ──────────────────────────────────────────────────
@@ -1297,6 +1300,19 @@ $ui.BClose.Add_Click({
     $u = Cur; if (-not $u) { return }
     if (-not (Confirm "לסגור את NOVA אצל $($u.name)?" 'NOVA תיסגר לגמרי אצלו תוך דקה ולא תיפתח מחדש (גם הנגן ברקע ייעצר). אם היא סגורה - לא יקרה כלום.')) { return }
     if (Ntfy-Post (Cmd-Topic (Normalize $u.pretty)) 'close') { Say "נשלח. NOVA של $($u.name) תיסגר תוך דקה (אם היא פתוחה)." } else { Say 'השליחה נכשלה. כדאי לבדוק את האינטרנט ולנסות שוב.' }
+})
+# S-498 (Roni): "update" command, one user or everyone. The TV downloads the new build; the viewer presses Install once. A NOVA from before S-498 ignores it.
+$ui.BUpdate.Add_Click({
+    $u = Cur; if (-not $u) { return }
+    if (-not (Confirm "לעדכן את NOVA אצל $($u.name)?" 'אם יש גרסה חדשה, הטלוויזיה תוריד אותה לבד והצופה ילחץ פעם אחת על התקן. קורה רק אם NOVA פתוחה אצלו ובגרסה שכוללת את הפקודה הזאת.')) { return }
+    if (Ntfy-Post (Cmd-Topic (Normalize $u.pretty)) 'update') { Say "נשלח. NOVA של $($u.name) תוריד את העדכון תוך דקות (אם היא פתוחה)." } else { Say 'השליחה נכשלה. כדאי לבדוק את האינטרנט ולנסות שוב.' }
+})
+$ui.BUpdateAll.Add_Click({
+    $us = @(Shown-Users | Where-Object { $_.active -and -not $_.del })
+    if (-not $us.Count) { Say 'אין משתמשים פעילים.'; return }
+    if (-not (Confirm 'לעדכן את NOVA אצל כל המשתמשים הפעילים?' 'כל טלוויזיה פתוחה תוריד את הגרסה החדשה לבד והצופה ילחץ פעם אחת על התקן. טלוויזיה על גרסה ישנה יותר לא תקבל את הפקודה ותעדכן ידנית.')) { return }
+    $ok = 0; foreach ($u in $us) { if (Ntfy-Post (Cmd-Topic (Normalize $u.pretty)) 'update') { $ok++ } }
+    Say "נשלח ל-$ok מתוך $($us.Count) משתמשים."
 })
 $ui.BRename.Add_Click({
     $u = Cur; if (-not $u) { return }
