@@ -1,23 +1,23 @@
 {
-    "versionCode":  468,
-    "versionName":  "0.1.467",
+    "versionCode":  469,
+    "versionName":  "0.1.468",
     "url":  "https://github.com/mailroni-cell/nova-access/raw/main/NOVA.apk",
     "urls":  [
-                 "https://nova-relay.mail-roni.workers.dev/apk/68b677f3fda8f2c416e62e46b3aa4af0f80b5f0f",
-                 "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@68b677f3fda8f2c416e62e46b3aa4af0f80b5f0f/NOVA.apk",
-                 "https://raw.githubusercontent.com/mailroni-cell/nova-access/68b677f3fda8f2c416e62e46b3aa4af0f80b5f0f/NOVA.apk"
+                 "https://nova-relay.mail-roni.workers.dev/apk/199b2197009f51ac8adac1c4c9e2dcd18a5952cd",
+                 "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@199b2197009f51ac8adac1c4c9e2dcd18a5952cd/NOVA.apk",
+                 "https://raw.githubusercontent.com/mailroni-cell/nova-access/199b2197009f51ac8adac1c4c9e2dcd18a5952cd/NOVA.apk"
              ],
     "admin":  {
-                  "versionCode":  468,
-                  "versionName":  "1.0.467",
+                  "versionCode":  469,
+                  "versionName":  "1.0.468",
                   "urls":  [
-                               "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@cec6b64bf0089ee7ff6d00107c3c0df7463d98c4/NOVA-Admin.apk",
-                               "https://raw.githubusercontent.com/mailroni-cell/nova-access/cec6b64bf0089ee7ff6d00107c3c0df7463d98c4/NOVA-Admin.apk"
+                               "https://cdn.jsdelivr.net/gh/mailroni-cell/nova-access@7648042726af65661b095f38034a738b8f67a34a/NOVA-Admin.apk",
+                               "https://raw.githubusercontent.com/mailroni-cell/nova-access/7648042726af65661b095f38034a738b8f67a34a/NOVA-Admin.apk"
                            ]
               },
     "adminPc":  {
-                    "version":  32,
-                    "url":  "https://raw.githubusercontent.com/mailroni-cell/nova-access/cec6b64bf0089ee7ff6d00107c3c0df7463d98c4/NOVA-Admin-PC.ps1"
+                    "version":  33,
+                    "url":  "https://raw.githubusercontent.com/mailroni-cell/nova-access/7648042726af65661b095f38034a738b8f67a34a/NOVA-Admin-PC.ps1"
                 },
-    "adminSig":  "ad1d3d89f5675c5ad298fbd2f0fd42818fb59071-534193a5553b7bb24c01c69c10caa5e0f5144f9f"
+    "adminSig":  "09ba8d7fb19b0df1b80367a9583d0bf0d5ac7e5f-36e90a45d885e01eb894d1af099b9a25f2e2e0c5"
 }
